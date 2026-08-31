@@ -1,0 +1,16 @@
+﻿@model OpenAuth.IdentityServer.Quickstart.Account.LogoutViewModel
+
+<div class="auth-card">
+    <div class="auth-card-header">
+        <div class="status-icon status-icon--warning">&#128075;</div>
+        <h1>确认退出</h1>
+        <p>您确定要退出当前登录状态吗？</p>
+    </div>
+
+    <form asp-action="Logout">
+        <input type="hidden" name="logoutId" value="@Model.LogoutId" />
+        <div class="btn-group">
+            <button class="btn btn-danger" type="submit">确认退出</button>
+        </div>
+    </form>
+</div>

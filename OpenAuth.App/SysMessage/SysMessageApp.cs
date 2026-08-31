@@ -1,0 +1,127 @@
+﻿using System;
+using System.Linq;
+using System.Threading.Tasks;
+using Infrastructure;
+using Microsoft.Extensions.Logging;
+using OpenAuth.App.Interface;
+using OpenAuth.App.Request;
+using OpenAuth.App.Response;
+using OpenAuth.Repository.Domain;
+using Infrastructure.Helpers;
+using SqlSugar;
+
+
+namespace OpenAuth.App
+{
+    public class SysMessageApp : SqlSugarBaseApp<SysMessage>
+    {
+        private RevelanceManagerApp _revelanceApp;
+        private readonly ILogger<SysMessageApp> _logger;
+
+        /// <summary>
+        /// 加载列表
+        /// </summary>
+        public async Task<PagedDynamicDataResp> Load(QuerySysMessageListReq request)
+        {
+            var loginContext = _auth.GetCurrentUser();
+            if (loginContext == null)
+            {
+                throw new CommonException("登录已过期", Define.INVALID_TOKEN);
+            }
+
+            var result = new PagedDynamicDataResp();
+            var objs = SugarClient.Queryable<SysMessage>().Where(u =>u.ToId == loginContext.User.Id && u.ToStatus != -1);
+
+            if (!string.IsNullOrEmpty(request.key))
+            {
+                objs = objs.Where(u => u.Title.Contains(request.key) || u.Id.Contains(request.key));
+            }
+            
+            //过滤消息状态
+            if (request.Status != 999)
+            {
+                objs = objs.Where(u => u.ToStatus == request.Status);
+            }
+
+            result.Data =await objs.OrderByDescending(u => u.CreateTime)
+                .Skip((request.page - 1) * request.limit)
+                .Take(request.limit).ToListAsync();
+            result.Count = await objs.CountAsync();
+            return result;
+        }
+
+        public void Add(SysMessage obj)
+        {
+            Repository.Insert(obj);
+        }
+
+        /// <summary>
+        /// 发送指定消息给用户
+        /// </summary>
+        /// <param name="user"></param>
+        /// <param name="message"></param>
+        public void SendMsgTo(string userId, string message)
+        {
+            SysUser sysUser = null;
+            if (userId == Guid.Empty.ToString())
+            {
+                sysUser = new SysUser
+                {
+                    Name = Define.SYSTEM_USERNAME,
+                    Id = userId
+                };
+            }
+            else
+            {
+                 sysUser = SugarClient.Queryable<SysUser>().First(u => u.Id == userId);
+            }
+            if (sysUser == null)
+            {
+                _logger.LogError($"未能找到用户{userId},不能给该用户发送消息");
+                return;
+            }
+            Repository.Insert(new SysMessage
+            {
+                ToId = sysUser.Id,
+                ToName = sysUser.Name,
+                TypeName = "系统消息",
+                TypeId ="SYS_MSG",
+                FromId = Guid.Empty.ToString(),
+                FromName = "系统管理员",
+                Content = message,
+                CreateTime = TimeHelper.Now
+            });
+        }
+
+        /// <summary>
+        /// 消息变为已读
+        /// </summary>
+        /// <param name="msgid"></param>
+        public void Read(ReadMsgReq req)
+        {
+            Repository.Update(u => new SysMessage
+            {
+                ToStatus = 1
+            }, u => u.Id == req.Id);
+        }
+        /// <summary>
+        /// 消息采用逻辑删除
+        /// </summary>
+        /// <param name="ids"></param>
+        public void Del(string[] ids)
+        {
+            Repository.Update(u => new SysMessage
+            {
+               ToStatus = -1 //逻辑删除
+            }, u => ids.Contains(u.Id));
+
+        }
+
+        public SysMessageApp(ISqlSugarClient client,
+            RevelanceManagerApp app,IAuth auth, ILogger<SysMessageApp> logger) : base(client, auth)
+        {
+            _revelanceApp = app;
+            _logger = logger;
+        }
+    }
+}

@@ -1,0 +1,35 @@
+﻿@model OpenAuth.IdentityServer.Quickstart.Account.LoggedOutViewModel
+
+@{
+    ViewData["signed-out"] = true;
+}
+
+<div class="auth-card">
+    <div class="auth-card-header">
+        <div class="status-icon status-icon--success">&#10004;</div>
+        <h1>已安全退出</h1>
+        <p>您已成功退出登录</p>
+    </div>
+
+    @if (Model.PostLogoutRedirectUri != null)
+    {
+        <div style="text-align: center;">
+            <a class="status-link" href="@Model.PostLogoutRedirectUri">
+                返回 @Model.ClientName &#8594;
+            </a>
+        </div>
+    }
+
+    @if (Model.SignOutIframeUrl != null)
+    {
+        <iframe class="signout-iframe" src="@Model.SignOutIframeUrl"></iframe>
+    }
+</div>
+
+@section scripts
+{
+    @if (Model.AutomaticRedirectAfterSignOut)
+    {
+        <script src="~/js/signout-redirect.js"></script>
+    }
+}

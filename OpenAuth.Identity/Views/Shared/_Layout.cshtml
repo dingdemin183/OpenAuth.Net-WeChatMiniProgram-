@@ -1,0 +1,47 @@
+﻿@{
+    string name = null;
+    if (!true.Equals(ViewData["signed-out"]))
+    {
+        name = Context.User?.Identity?.IsAuthenticated == true ? Context.User.Identity.Name : null;
+    }
+}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>OpenAuth.Net 认证中心</title>
+    <meta name="description" content="OpenAuth.Net 统一身份认证平台" />
+    <link rel="icon" type="image/x-icon" href="~/favicon.ico" />
+    <link rel="shortcut icon" type="image/x-icon" href="~/favicon.ico" />
+    <link rel="stylesheet" href="~/css/site.css" />
+</head>
+<body>
+    <div class="auth-wrapper">
+        <header class="auth-header">
+            <a href="~/" class="brand">
+                <img src="~/favicon.ico" alt="Logo" />
+                <span>OpenAuth.Net</span>
+            </a>
+            @if (!string.IsNullOrWhiteSpace(name))
+            {
+                <div class="user-menu">
+                    <span>@name</span>
+                    <a asp-action="Logout" asp-controller="Account">退出登录</a>
+                </div>
+            }
+        </header>
+
+        <main class="auth-main">
+            @RenderBody()
+        </main>
+
+        <footer class="auth-footer">
+            &copy; @DateTime.Now.Year OpenAuth.Net - 统一身份认证平台
+        </footer>
+    </div>
+
+    @RenderSection("scripts", required: false)
+</body>
+</html>

@@ -1,0 +1,31 @@
+﻿@model OpenAuth.IdentityServer.Quickstart.Home.ErrorViewModel
+
+<div class="auth-card">
+    <div class="auth-card-header">
+        <div class="status-icon status-icon--error">&#10060;</div>
+        <h1>出错了</h1>
+        <p>处理您的请求时发生了错误</p>
+    </div>
+
+    <div class="alert alert-error">
+        <span>&#9888;</span>
+        <div>
+            @if (!string.IsNullOrEmpty(Model?.ErrorId))
+            {
+                <div><strong>错误编号：</strong>@Model.ErrorId</div>
+            }
+            @if (!string.IsNullOrEmpty(Model?.ErrorMessage))
+            {
+                <div>@Model.ErrorMessage</div>
+            }
+            else
+            {
+                <div>抱歉，服务器遇到了意外问题。</div>
+            }
+        </div>
+    </div>
+
+    <div style="text-align: center;">
+        <a class="status-link" href="/">返回首页 &#8594;</a>
+    </div>
+</div>

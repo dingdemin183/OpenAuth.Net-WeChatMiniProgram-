@@ -1,0 +1,16 @@
+﻿@model OpenAuth.IdentityServer.Quickstart.Account.RedirectViewModel
+
+<div class="auth-card">
+    <div class="auth-card-header">
+        <div class="status-icon status-icon--info">&#8634;</div>
+        <h1>正在跳转</h1>
+        <p class="loading-dots">正在返回应用程序</p>
+    </div>
+
+    <div class="status-text">
+        页面即将自动跳转，如未自动跳转请 <a href="@Model.RedirectUrl">点击此处</a>
+    </div>
+</div>
+
+<meta http-equiv="refresh" content="0;url=@Model.RedirectUrl" data-url="@Model.RedirectUrl">
+<script src="~/js/signin-redirect.js"></script>
