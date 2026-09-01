@@ -37,7 +37,11 @@ namespace OpenAuth.App.SSO
             SugarClient = client;
         }
 
-        // ============ 原有的 Do 方法保持不变（账号密码登录） ============
+        /// <summary>
+        /// 账号密码登录
+        /// </summary>
+        /// <param name="model"></param>
+        /// <returns></returns>
         public LoginResult Do(PassportLoginRequest model)
         {
             var result = new LoginResult();
@@ -110,13 +114,17 @@ namespace OpenAuth.App.SSO
             return result;
         }
 
-        // ============ 新增：微信小程序登录（只用 SysUserExternalAuth 表） ============
+        /// <summary>
+        /// 微信小程序登录
+        /// </summary>
+        /// <param name="model">请求参数 code</param>
+        /// <returns></returns>
         public async Task<LoginResult> WxMiniProgramLoginAsync(WxMiniProgramLoginRequest model)
         {
             var result = new LoginResult();
             try
             {
-                // 1. 调用微信接口换取 openid
+                //  调用微信接口换取 openid
                 var wxResult = await _wxService.GetOpenIdAndSessionKeyAsync(model.Code);
 
      
@@ -130,10 +138,12 @@ namespace OpenAuth.App.SSO
                     return result;
                 }
 
-                // 2. 根据 openid 查找或创建用户（直接操作 SysUserExternalAuth 表）
+                //  根据 openid 查找或创建用户（直接操作 SysUserExternalAuth 表）
                 var userAuth = await GetOrCreateUserAuthAsync(openId, wxResult.UnionId, sessionKey);
 
-                // 3. 生成 Session 和 JWT Token（复用原逻辑）
+                var userId = userAuth.Id; // 这里的 userId 是 SysUserExternalAuth 表的主键
+
+                // 生成 Session 和 JWT Token（复用原逻辑）
                 var sessionId = Guid.NewGuid().ToString("N");
                 var expireDays = _appConfiguration.Value.JwtExpireDays;
 
@@ -141,8 +151,9 @@ namespace OpenAuth.App.SSO
                 {
                     Account = openId, // 用 openid 作为账号
                     Name = userAuth.NickName ?? $"微信用户_{openId.Substring(0, 6)}",
+                    UserId=userId,
                     Token = sessionId,
-                    AppKey = model.AppKey,
+                    AppKey = "miniprogram",
                     CreateTime = TimeHelper.Now
                 };
 
@@ -151,7 +162,7 @@ namespace OpenAuth.App.SSO
                 var jwtToken = JwtTokenHelper.GenerateToken(
                     openId, // 用 openid 作为账号
                     currentSession.Name,
-                    model.AppKey,
+                     "miniprogram",
                     sessionId,
                     _appConfiguration.Value.JwtSecret,
                     expireDays
@@ -172,14 +183,18 @@ namespace OpenAuth.App.SSO
         }
 
         /// <summary>
-        /// 根据 OpenId 查找或创建用户（只用 SysUserExternalAuth 表）
+        /// 根据 OpenId 查找或创建用户（SysUserExternalAuth 表）
         /// </summary>
+        /// <param name="openId"></param>
+        /// <param name="unionId"></param>
+        /// <param name="sessionKey"></param>
+        /// <returns></returns>
         private async Task<SysUserExternalAuth> GetOrCreateUserAuthAsync(
             string openId,
             string unionId,
             string sessionKey)
         {
-            // 1. 查询是否存在
+            //  查询是否存在
             var existing = SugarClient.Queryable<SysUserExternalAuth>()
                 .First(x => x.Provider == "WeChatMiniProgram" && x.OpenId == openId && !x.IsDeleted);
 
@@ -195,7 +210,7 @@ namespace OpenAuth.App.SSO
                 return existing;
             }
 
-            // 2. 不存在 → 自动注册新用户
+            // 不存在 则自动注册新用户
             var newAuth = new SysUserExternalAuth
             {
                 Id = Guid.NewGuid().ToString("N"),
@@ -208,9 +223,41 @@ namespace OpenAuth.App.SSO
                 IsDeleted = false
             };
 
-            SugarClient.Insertable(newAuth).ExecuteCommand();
+           await  SugarClient.Insertable(newAuth).ExecuteCommandAsync().ConfigureAwait(false);
 
             return newAuth;
+        }
+
+        /// <summary>
+        /// 更新用户手机号
+        /// </summary>
+        /// <param name="openId">openid</param>
+        /// <param name="phoneNumber">手机号</param>
+        /// <returns></returns>
+        /// <exception cref="Exception"></exception>
+        public async Task<bool> UpdateUserPhoneAsync(string openId, string phoneNumber)
+        {
+            if (string.IsNullOrEmpty(openId))
+                throw new Exception("OpenId 不能为空");
+
+            if (string.IsNullOrEmpty(phoneNumber))
+                throw new Exception("手机号不能为空");
+
+            var userAuth = SugarClient.Queryable<SysUserExternalAuth>()
+                .First(x => x.OpenId == openId && !x.IsDeleted);
+
+            if (userAuth == null)
+                throw new Exception("用户不存在");
+
+            userAuth.UserPhone = phoneNumber;
+            userAuth.UpdateTime = DateTime.Now;
+
+            var result = await SugarClient.Updateable(userAuth)
+                .UpdateColumns(x => new { x.UserPhone, x.UpdateTime })
+                .ExecuteCommandAsync()
+                .ConfigureAwait(false);
+
+            return result > 0;
         }
     }
 }

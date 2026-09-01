@@ -10,12 +10,20 @@ namespace Infrastructure
 
         public AppSetting()
         {
-            SSOPassport = "http://localhost:52789";  
+            SSOPassport = "http://localhost:52789";
             Version = "";
             UploadPath = "";
             IdentityServerUrl = "";
         }
 
+        /// <summary>
+        /// 微信支付配置
+        /// </summary>
+        public WeChatPaySetting WeChatPay { get; set; }
+
+        /// <summary>
+        /// 小程序登录配置
+        /// </summary>
         public WeChatMiniProgramConfig WeChatMiniProgram { get; set; }
         /// <summary>
         /// SSO地址
@@ -38,7 +46,7 @@ namespace Infrastructure
 
         //identity授权的地址
         public string IdentityServerUrl { get; set; }
-        
+
         /// <summary>
         /// Redis服务器配置
         /// </summary>
@@ -69,4 +77,27 @@ namespace Infrastructure
         public string AppSecret { get; set; }
     }
 
+    public class WeChatPaySetting
+    {
+        /// <summary>
+        /// 小程序AppId
+        /// </summary>
+        public string AppId { get; set; }
+
+        /// <summary>
+        /// 商户号
+        /// </summary>
+        public string MchId { get; set; }
+
+        /// <summary>
+        /// API密钥
+        /// </summary>
+        public string ApiKey { get; set; }
+
+        /// <summary>
+        /// 支付回调地址
+        /// </summary>
+        public string NotifyUrl { get; set; }
+
+    }
 }

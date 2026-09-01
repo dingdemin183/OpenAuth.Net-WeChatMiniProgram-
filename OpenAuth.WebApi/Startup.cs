@@ -1,15 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using Autofac;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using Autofac;
 using Infrastructure;
 using Infrastructure.Extensions.AutofacManager;
 using Infrastructure.Middleware;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,9 +17,15 @@ using Newtonsoft.Json;
 using OpenAuth.App;
 using OpenAuth.App.HostedService;
 using OpenAuth.Repository;
+using OpenAuth.WebApi.Middleware;
 using OpenAuth.WebApi.Model;
 using SqlSugar;
 using Swashbuckle.AspNetCore.SwaggerUI;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
 
 namespace OpenAuth.WebApi
 {
@@ -42,12 +44,17 @@ namespace OpenAuth.WebApi
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
+
+
+            // 注册文件上传服务
+          //  services.AddScoped<FileUploadApp>();
+           // services.AddScoped<CaptchaApp>();
             //在startup中需要强制创建log4net
             var loggerFactory = LoggerFactory.Create(builder => { builder.AddLog4Net(); });
             ILogger logger = loggerFactory.CreateLogger<Startup>();
 
             var identityServer =
-                ((ConfigurationSection) Configuration.GetSection("AppSetting:IdentityServerUrl")).Value;
+                ((ConfigurationSection)Configuration.GetSection("AppSetting:IdentityServerUrl")).Value;
             if (!string.IsNullOrEmpty(identityServer))
             {
                 services.AddAuthorization();
@@ -156,7 +163,7 @@ namespace OpenAuth.WebApi
             services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(Configuration["DataProtection"]));
 
             //在startup里面只能通过这种方式获取到appsettings里面的值，不能用IOptions😰
-            var dbtypes = ((ConfigurationSection) Configuration.GetSection("AppSetting:DbTypes")).GetChildren()
+            var dbtypes = ((ConfigurationSection)Configuration.GetSection("AppSetting:DbTypes")).GetChildren()
                 .ToDictionary(x => x.Key, x => x.Value);
             var sqlsugarTypes = UtilMethods.EnumToDictionary<SqlSugar.DbType>();
             services.AddScoped<ISqlSugarClient>(s =>
@@ -164,18 +171,18 @@ namespace OpenAuth.WebApi
                 // 获取所有连接字符串配置
                 var connectionStrings = Configuration.GetSection("ConnectionStrings").GetChildren()
                     .ToDictionary(x => x.Key, x => x.Value);
-                
+
                 // 准备ConnectionConfig列表
                 var connectionConfigs = new List<ConnectionConfig>();
-                
+
                 // 遍历所有连接字符串
                 foreach (var conn in connectionStrings)
                 {
                     // 获取对应的数据库类型
-                    var connDbType = dbtypes.ContainsKey(conn.Key) ? 
+                    var connDbType = dbtypes.ContainsKey(conn.Key) ?
                         sqlsugarTypes.FirstOrDefault(it => dbtypes[conn.Key].ToLower().Contains(it.Key)).Value :
                         DbType.SqlServer; // 如果没有定义DbType，使用默认类型
-                    
+
                     // 创建连接配置
                     var config = new ConnectionConfig
                     {
@@ -183,32 +190,32 @@ namespace OpenAuth.WebApi
                         ConnectionString = conn.Value,
                         IsAutoCloseConnection = true,
                     };
-                    
+
                     // 如果不是默认连接，设置ConfigId
                     if (conn.Key != Define.DEFAULT_TENANT_ID)
                     {
                         config.ConfigId = conn.Key;
                     }
-                    
+
                     connectionConfigs.Add(config);
                     logger.LogInformation($"添加数据库连接: {conn.Key} / {(dbtypes.ContainsKey(conn.Key) ? dbtypes[conn.Key] : "未指定类型")}，连接字符串：{conn.Value}");
                 }
 
                 //通过ConfigId为空判断是否有默认的连接字符串
-                if(!connectionConfigs.Any(x => x.ConfigId == null))
+                if (!connectionConfigs.Any(x => x.ConfigId == null))
                 {
                     throw new Exception($"没有找到默认的连接字符串:{Define.DEFAULT_TENANT_ID}");
                 }
 
                 //把connectionConfigs排序，ConfigId为空的放在最前面，即默认的连接字符串必须排最前面
                 connectionConfigs = connectionConfigs.OrderBy(x => x.ConfigId == null ? 0 : 1).ToList();
-                
+
                 var sqlSugar = new SqlSugarClient(connectionConfigs);
 
                 // 配置PostgreSQL数据库处理
                 foreach (var connConfig in connectionConfigs)
                 {
-                    if(connConfig.DbType == SqlSugar.DbType.PostgreSQL)
+                    if (connConfig.DbType == SqlSugar.DbType.PostgreSQL)
                     {
                         // 配置bool类型转换为smallint
                         sqlSugar.Aop.OnExecutingChangeSql = (sql, parameters) =>
@@ -228,13 +235,13 @@ namespace OpenAuth.WebApi
                         break; // 找到一个PostgreSQL连接后就设置一次即可
                     }
                 }
-                
+
                 return sqlSugar;
             });
 
 
             //设置定时启动的任务
-            services.AddHostedService<QuartzService>();
+            //services.AddHostedService<QuartzService>();
         }
 
         public void ConfigureContainer(ContainerBuilder builder)
@@ -243,9 +250,11 @@ namespace OpenAuth.WebApi
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IHostEnvironment env, ILoggerFactory loggerFactory)
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ILoggerFactory loggerFactory)
         {
             loggerFactory.AddLog4Net();
+
+            app.UseMiddleware<GlobalExceptionMiddleware>();
 
             //todo:测试可以允许任意跨域，正式环境要加权限
             app.UseCors(builder => builder.AllowAnyOrigin()
@@ -291,21 +300,21 @@ namespace OpenAuth.WebApi
             //配置ServiceProvider
             AutofacContainerModule.ConfigServiceProvider(app.ApplicationServices);
 
-            //可以访问根目录下面的静态文件
-            var staticfile = new StaticFileOptions
-            {
-                FileProvider = new PhysicalFileProvider(AppContext.BaseDirectory),
-                OnPrepareResponse = (ctx) =>
-                {
-                    //可以在这里为静态文件添加其他http头信息，默认添加跨域信息
-                    ctx.Context.Response.Headers["Access-Control-Allow-Origin"] = "*";
-                }
-            };
-            app.UseStaticFiles(staticfile);
+            ////可以访问根目录下面的静态文件
+            //var staticfile = new StaticFileOptions
+            //{
+            //    FileProvider = new PhysicalFileProvider(AppContext.BaseDirectory),
+            //    OnPrepareResponse = (ctx) =>
+            //    {
+            //        //可以在这里为静态文件添加其他http头信息，默认添加跨域信息
+            //        ctx.Context.Response.Headers["Access-Control-Allow-Origin"] = "*";
+            //    }
+            //};
+            //app.UseStaticFiles(staticfile);
+            app.UseStaticFiles();
 
-            
 
-            
+
         }
 
         /// <summary>
@@ -317,7 +326,7 @@ namespace OpenAuth.WebApi
             var apisetting = controller.GetCustomAttribute(typeof(ApiExplorerSettingsAttribute));
             if (apisetting != null)
             {
-                groupname = ((ApiExplorerSettingsAttribute) apisetting).GroupName;
+                groupname = ((ApiExplorerSettingsAttribute)apisetting).GroupName;
             }
 
             return groupname;

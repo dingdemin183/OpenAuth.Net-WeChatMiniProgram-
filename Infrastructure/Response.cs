@@ -1,5 +1,18 @@
-﻿namespace Infrastructure
+﻿using System.Collections.Generic;
+
+namespace Infrastructure
 {
+    /// <summary>
+    /// 表格数据响应
+    /// </summary>
+    public class TableResp<T> : Response
+    {
+        public List<T> Data { get; set; }
+        public int Count { get; set; }
+        public int Page { get; set; }
+        public int Limit { get; set; }
+    }
+
     public class Response
     {
         /// <summary>

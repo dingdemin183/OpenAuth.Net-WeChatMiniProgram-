@@ -15,10 +15,6 @@ namespace OpenAuth.App.SSO
         /// </summary>
         public string Code { get; set; }
 
-        /// <summary>
-        /// 应用标识（保持和原系统一致）
-        /// </summary>
-        public string AppKey { get; set; } = "admin";
     }
 
     /// <summary>

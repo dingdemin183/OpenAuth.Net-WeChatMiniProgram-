@@ -4,6 +4,7 @@
  * 2、可以方便的使用mock进行单元测试
  */
 
+using Infrastructure.Domain;
 using OpenAuth.App.SSO;
 
 namespace OpenAuth.App.Interface
@@ -32,5 +33,21 @@ namespace OpenAuth.App.Interface
         /// </summary>
         /// <returns></returns>
         bool Logout();
+
+
+        /// <summary>
+        /// 获取当前微信用户信息
+        /// </summary>
+        WxUserInfo GetCurrentWxUserInfo();
+
+        /// <summary>
+        /// 获取当前用户信息（统一接口）
+        /// </summary>
+        CurrentUserInfo GetCurrentUserInfo();
+
+        /// <summary>
+        /// 获取当前会话（直接从缓存）
+        /// </summary>
+        UserAuthSession GetCurrentSession();
     }
 }

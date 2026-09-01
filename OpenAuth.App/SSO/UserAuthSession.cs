@@ -15,6 +15,11 @@ namespace OpenAuth.App.SSO
         public string Account { get; set; }
 
         /// <summary>
+        /// 用户id
+        /// </summary>
+        public string UserId { get; set; }
+
+        /// <summary>
         /// 用户名
         /// </summary>
         public string Name { get; set; }

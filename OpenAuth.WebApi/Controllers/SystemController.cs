@@ -9,6 +9,7 @@ namespace OpenAuth.WebApi.Controllers
     /// 系统信息相关接口
     /// </summary>
     [Route("api/[controller]/[action]")]
+    [ApiExplorerSettings(GroupName = "系统信息_system")]
     [ApiController]
     public class SystemController : ControllerBase
     {

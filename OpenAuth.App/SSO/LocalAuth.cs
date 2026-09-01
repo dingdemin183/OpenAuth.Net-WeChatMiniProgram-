@@ -1,10 +1,12 @@
-using Infrastructure.Cache;
-using Microsoft.AspNetCore.Http;
-using OpenAuth.App.Interface;
-using System;
 using Infrastructure;
+using Infrastructure.Cache;
+using Infrastructure.Domain;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
+using OpenAuth.App.Interface;
 using OpenAuth.Repository.Domain;
+using SqlSugar;
+using System;
 
 namespace OpenAuth.App.SSO
 {
@@ -20,11 +22,12 @@ namespace OpenAuth.App.SSO
         private AuthContextFactory _app;
         private LoginParse _loginParse;
         private ICacheContext _cacheContext;
+        private readonly ISqlSugarClient _sugarClient;
 
         public LocalAuth(IHttpContextAccessor httpContextAccessor
             , AuthContextFactory app
             , LoginParse loginParse
-            , ICacheContext cacheContext, IOptions<AppSetting> appConfiguration, SysLogApp logApp)
+            , ICacheContext cacheContext, IOptions<AppSetting> appConfiguration, SysLogApp logApp, ISqlSugarClient sugarClient)
         {
             _httpContextAccessor = httpContextAccessor;
             _app = app;
@@ -32,6 +35,150 @@ namespace OpenAuth.App.SSO
             _cacheContext = cacheContext;
             _appConfiguration = appConfiguration;
             _logApp = logApp;
+            _sugarClient = sugarClient;
+        }
+
+        /// <summary>
+        /// 【新增】获取当前登录的微信小程序用户信息
+        /// </summary>
+        /// <returns>微信用户信息，如果不是微信登录则返回 null</returns>
+        public WxUserInfo GetCurrentWxUserInfo()
+        {
+            try
+            {
+                var token = GetToken();
+                if (string.IsNullOrEmpty(token)) return null;
+
+                // 验证 Token 有效性
+                var principal = JwtTokenHelper.ValidateToken(token, _appConfiguration.Value.JwtSecret);
+                if (principal == null) return null;
+
+                // 从 Token 提取 Account
+                var account = JwtTokenHelper.GetAccount(token);
+                if (string.IsNullOrEmpty(account)) return null;
+
+                // 验证会话是否存在
+                var sessionId = GetSessionIdFromToken(token);
+                if (string.IsNullOrEmpty(sessionId)) return null;
+
+                var session = _cacheContext.Get<UserAuthSession>(sessionId);
+                if (session == null) return null;
+
+                // 判断是否为微信小程序登录
+                if (session.AppKey != "miniprogram") return null;
+
+                // 从数据库查询完整的微信用户信息
+                var wxUser = _sugarClient.Queryable<SysUserExternalAuth>()
+                    .First(x => x.OpenId == account && x.Provider == "WeChatMiniProgram" && !x.IsDeleted);
+
+                if (wxUser == null) return null;
+
+                return new WxUserInfo
+                {
+                    OpenId = wxUser.OpenId,
+                    UnionId = wxUser.UnionId,
+                    NickName = wxUser.NickName,
+                    SessionKey = wxUser.SessionKey,
+                    AvatarUrl = wxUser.AvatarUrl, // 如果有此字段
+                    CreateTime = wxUser.CreateTime,
+                    // 从 Session 获取额外信息
+                    LoginTime = session.CreateTime,
+                    Token = token
+                };
+            }
+            catch (Exception ex)
+            {
+                // 记录日志但不抛出，避免影响业务
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 【新增】获取当前登录用户信息（统一接口，支持所有登录方式）
+        /// </summary>
+        public CurrentUserInfo GetCurrentUserInfo()
+        {
+            try
+            {
+                var token = GetToken();
+                if (string.IsNullOrEmpty(token)) return null;
+
+                var principal = JwtTokenHelper.ValidateToken(token, _appConfiguration.Value.JwtSecret);
+                if (principal == null) return null;
+
+                var account = JwtTokenHelper.GetAccount(token);
+                if (string.IsNullOrEmpty(account)) return null;
+
+                var sessionId = GetSessionIdFromToken(token);
+                if (string.IsNullOrEmpty(sessionId)) return null;
+
+                var session = _cacheContext.Get<UserAuthSession>(sessionId);
+                if (session == null) return null;
+
+                var userInfo = new CurrentUserInfo
+                {
+                    Account = account,
+                    Name = session.Name,
+                    AppKey = session.AppKey,
+                    LoginTime = session.CreateTime,
+                    Token = token
+                };
+
+                // 如果是微信登录，补充微信信息
+                if (session.AppKey == "miniprogram")
+                {
+                    var wxUser = _sugarClient.Queryable<SysUserExternalAuth>()
+                        .First(x => x.OpenId == account && x.Provider == "WeChatMiniProgram" && !x.IsDeleted);
+
+                    if (wxUser != null)
+                    {
+                        userInfo.OpenId = wxUser.OpenId;
+                        userInfo.UnionId = wxUser.UnionId;
+                        userInfo.NickName = wxUser.NickName;
+                        userInfo.AvatarUrl = wxUser.AvatarUrl;
+                        userInfo.LoginProvider = "WeChatMiniProgram";
+                    }
+                }
+                else
+                {
+                    userInfo.LoginProvider = "Local";
+                    // 如果是本地登录，可以查 SysUser 表
+                    var sysUser = _sugarClient.Queryable<SysUser>()
+                        .First(x => x.Account == account);
+                    if (sysUser != null)
+                    {
+                        userInfo.Name = sysUser.Name;
+                        userInfo.UserId = sysUser.Id;
+                    }
+                }
+
+                return userInfo;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 【新增】直接从缓存获取 Session（不查数据库，性能最好）
+        /// </summary>
+        public UserAuthSession GetCurrentSession()
+        {
+            try
+            {
+                var token = GetToken();
+                if (string.IsNullOrEmpty(token)) return null;
+
+                var sessionId = GetSessionIdFromToken(token);
+                if (string.IsNullOrEmpty(sessionId)) return null;
+
+                return _cacheContext.Get<UserAuthSession>(sessionId);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         /// <summary>

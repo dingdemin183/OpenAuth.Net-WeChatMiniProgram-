@@ -1,5 +1,4 @@
-﻿
-using System;
+﻿using System;
 
 namespace Infrastructure
 {
@@ -7,6 +6,18 @@ namespace Infrastructure
     {
         private int _code;
 
+        /// <summary>
+        /// 只传消息，默认错误码为 500
+        /// </summary>
+        public CommonException(string message)
+            : base(message)
+        {
+            this._code = 500;
+        }
+
+        /// <summary>
+        /// 传消息和错误码
+        /// </summary>
         public CommonException(string message, int code)
             : base(message)
         {
@@ -17,6 +28,5 @@ namespace Infrastructure
         {
             get { return _code; }
         }
-
     }
 }

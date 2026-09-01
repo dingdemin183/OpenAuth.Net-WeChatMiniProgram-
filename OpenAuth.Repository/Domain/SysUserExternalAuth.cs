@@ -22,6 +22,11 @@ namespace OpenAuth.Repository.Domain
         public string OpenId { get; set; }
 
         /// <summary>
+        /// 手机号
+        /// </summary>
+        public string UserPhone { get; set; }
+
+        /// <summary>
         /// 开放平台 UnionId（可选）
         /// </summary>
         public string UnionId { get; set; }
