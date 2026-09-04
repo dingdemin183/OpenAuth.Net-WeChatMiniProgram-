@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using OpenAuth.App.Interface;
 using OpenAuth.App.SSO;
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace OpenAuth.WebApi.Controllers
@@ -18,7 +19,6 @@ namespace OpenAuth.WebApi.Controllers
         private readonly WxMiniProgramService _wxService;
         private readonly IAuth _auth;
 
-
         public WeChatController(LoginParse loginParse, WxMiniProgramService wxService, IAuth auth)
         {
             _loginParse = loginParse;
@@ -26,14 +26,20 @@ namespace OpenAuth.WebApi.Controllers
             _auth = auth;
         }
 
+        /// <summary>
+        /// 微信小程序一键登录（登录 + 获取手机号）
+        /// </summary>
+        /// <param name="request">请求参数，包含登录code和手机号code</param>
+        /// <returns></returns>
         [HttpPost]
         [AllowAnonymous]
-        public async Task<LoginResult> MiniProgramLogin([FromBody] WxMiniProgramLoginRequest request)
+        public async Task<LoginResult> MiniProgramLoginWithPhone([FromBody] WxMiniProgramLoginWithPhoneRequest request)
         {
             var result = new LoginResult();
             try
             {
-                result = await _loginParse.WxMiniProgramLoginAsync(request);
+                var userIp = GetUserIp();
+                result = await _loginParse.WxMiniProgramLoginWithPhoneAsync(request,userIp);
             }
             catch (Exception ex)
             {
@@ -43,73 +49,36 @@ namespace OpenAuth.WebApi.Controllers
             return result;
         }
 
+
         /// <summary>
-        /// 获取用户手机号
+        /// 获取用户最后登录的ip
         /// </summary>
-        /// <param name="request">请求参数</param>
         /// <returns></returns>
-        [HttpPost]
-        [AllowAnonymous]
-        public async Task<IActionResult> GetPhoneNumber([FromBody] WxPhoneRequest request)
+        private string GetUserIp()
         {
-            try
+            var ip = HttpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault();
+            if (string.IsNullOrEmpty(ip))
             {
-                //  调用微信接口获取手机号
-                var wxResult = await _wxService.GetUserPhoneAsync(request.Code);
-
-                if (wxResult.ErrCode != 0)
-                {
-                    return Ok(new
-                    {
-                        code = wxResult.ErrCode,
-                        message = wxResult.ErrMsg
-                    });
-                }
-
-                var phoneNumber = wxResult.PhoneInfo?.PurePhoneNumber ?? wxResult.PhoneInfo?.PhoneNumber;
-
-                if (string.IsNullOrEmpty(phoneNumber))
-                {
-                    return Ok(new
-                    {
-                        code = 500,
-                        message = "获取手机号失败"
-                    });
-                }
-
-                // 获取当前登录用户的 OpenId
-                var session = _auth.GetCurrentSession();
-
-                if (string.IsNullOrEmpty(session.Account))
-                {
-                    return Ok(new
-                    {
-                        code = 401,
-                        message = "请先登录"
-                    });
-                }
-
-                // 更新用户手机号
-                var result = await _loginParse.UpdateUserPhoneAsync(session.Account, phoneNumber);
-
-                return Ok(new
-                {
-                    code = 0,
-                    message = "手机号更新成功",
-                    data = new
-                    {
-                        phoneNumber = phoneNumber
-                    }
-                });
+                ip = HttpContext.Request.Headers["X-Real-IP"].FirstOrDefault();
             }
-            catch (Exception ex)
+            if (string.IsNullOrEmpty(ip))
             {
-                return Ok(new
-                {
-                    code = 500,
-                    message = ex.Message
-                });
+                ip = HttpContext.Connection.RemoteIpAddress?.ToString();
             }
+
+            // 如果是 IPv6 的本地地址，转换成 IPv4
+            if (ip == "::1" || ip == "127.0.0.1")
+            {
+                ip = "127.0.0.1";
+            }
+
+            // 如果有多层代理，取第一个真实IP
+            if (!string.IsNullOrEmpty(ip) && ip.Contains(','))
+            {
+                ip = ip.Split(',')[0].Trim();
+            }
+
+            return ip ?? "127.0.0.1";
         }
     }
 }

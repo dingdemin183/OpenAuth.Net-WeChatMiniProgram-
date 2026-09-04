@@ -77,27 +77,56 @@ namespace Infrastructure
         public string AppSecret { get; set; }
     }
 
+
+    /// <summary>
+    /// 微信支付配置(V3版本）
+    /// </summary>
     public class WeChatPaySetting
     {
-        /// <summary>
-        /// 小程序AppId
-        /// </summary>
-        public string AppId { get; set; }
-
         /// <summary>
         /// 商户号
         /// </summary>
         public string MchId { get; set; }
 
         /// <summary>
-        /// API密钥
+        /// 小程序 AppId
         /// </summary>
-        public string ApiKey { get; set; }
+        public string AppId { get; set; }
 
         /// <summary>
-        /// 支付回调地址
+        /// 商户证书序列号（从 apiclient_cert.pem 中读取）
+        /// </summary>
+        public string SerialNo { get; set; }
+
+        /// <summary>
+        /// 商户私钥文件路径（apiclient_key.pem，PKCS#8 格式）
+        /// </summary>
+        public string PrivateKeyPath { get; set; }
+
+        /// <summary>
+        /// 商户证书文件路径（apiclient_cert.p12，用于退款等需要双向证书的场景）
+        /// </summary>
+        public string CertPath { get; set; }
+
+        /// <summary>
+        /// 微信支付平台证书路径
+        /// </summary>
+        public string PlatformCertPath { get; set; }
+
+        /// <summary>
+        /// API V3 密钥（用于回调解密）
+        /// </summary>
+        public string ApiV3Key { get; set; }
+
+        /// <summary>
+        /// 微信支付回调通知地址
         /// </summary>
         public string NotifyUrl { get; set; }
 
+
+        /// <summary>
+        /// 退款回调通知地址
+        /// </summary>
+        public string RefundNotifyUrl { get; set; }
     }
 }

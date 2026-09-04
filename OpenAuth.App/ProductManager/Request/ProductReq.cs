@@ -43,6 +43,18 @@ namespace OpenAuth.App.Request
         public string Id { get; set; }
      
     }
+    /// <summary>
+    /// 批量删除商品请求
+    /// </summary>
+    public class DeleteProductReq
+    {
+        /// <summary>
+        /// 商品id
+        /// </summary>
+        public string[] Ids { get; set; }
+    }
+
+
 
     /// <summary>
     /// 查询商品列表请求

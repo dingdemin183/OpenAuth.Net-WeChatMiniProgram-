@@ -12,23 +12,25 @@
 // <summary>IOC扩展</summary>
 // ***********************************************************************
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Runtime.Loader;
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using Autofac.Extras.Quartz;
 using Infrastructure.Cache;
 using Infrastructure.Extensions.AutofacManager;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyModel;
 using OpenAuth.App.Interface;
 using OpenAuth.App.SSO;
+using OpenAuth.App.WxPay;
 using OpenAuth.Repository;
 using OpenAuth.Repository.Interface;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.Loader;
 using IContainer = Autofac.IContainer;
 
 namespace OpenAuth.App
@@ -62,7 +64,29 @@ namespace OpenAuth.App
             }
             
             InitDependency(builder);
-            
+
+            builder.Register(componentContext =>
+            {
+                // 解析 IConfiguration 获取配置
+                var configuration = componentContext.Resolve<IConfiguration>();
+                var appSetting = configuration.GetSection("AppSetting");
+
+                // 从配置中读取微信支付相关参数
+                var privateKeyPath = appSetting["WeChatPay:PrivateKeyPath"];
+                var certSerial = appSetting["WeChatPay:CertSerial"];
+                var apiV3Key = appSetting["WeChatPay:ApiV3Key"];
+
+                // 如果配置缺失，给出明确的错误提示（可以选配）
+                if (string.IsNullOrEmpty(privateKeyPath))
+                {
+                    throw new InvalidOperationException("微信支付配置缺失: AppSetting:WeChatPay:PrivateKeyPath 未设置");
+                }
+
+                return new WeChatPayV3Signer(privateKeyPath, certSerial, apiV3Key);
+            })
+            .AsSelf()
+            .InstancePerLifetimeScope();
+
             builder.RegisterModule(new QuartzAutofacFactoryModule());
 
             builder.Populate(services);
@@ -71,28 +95,47 @@ namespace OpenAuth.App
             return _container;
 
         }
-        
-        
+
+
         public static void InitAutofac(ContainerBuilder builder)
         {
-            
             //注册数据库基础操作和工作单元
             builder.RegisterGeneric(typeof(BaseRepository<,>)).As(typeof(IRepository<,>));
             builder.RegisterGeneric(typeof(UnitWork<>)).As(typeof(IUnitWork<>));
             //注入授权
             builder.RegisterType(typeof(LocalAuth)).As(typeof(IAuth)).InstancePerLifetimeScope();
-            
-            //注册app层
-            builder.RegisterAssemblyTypes(Assembly.GetExecutingAssembly());
-            
+
+            //注册app层（排除 WeChatPayV3Signer）
+            builder.RegisterAssemblyTypes(Assembly.GetExecutingAssembly())
+                   .Where(t => t != typeof(WeChatPayV3Signer));
+
             builder.RegisterType(typeof(CacheContext)).As(typeof(ICacheContext));
             builder.RegisterType(typeof(HttpContextAccessor)).As(typeof(IHttpContextAccessor));
-            
+
             InitDependency(builder);
-            
+
+            // 手动注册 WeChatPayV3Signer，从配置文件读取参数
+            builder.Register(componentContext =>
+            {
+                var configuration = componentContext.Resolve<IConfiguration>();
+                var appSetting = configuration.GetSection("AppSetting");
+
+                var privateKeyPath = appSetting["WeChatPay:PrivateKeyPath"];
+                var certSerial = appSetting["WeChatPay:CertSerial"];
+                var apiV3Key = appSetting["WeChatPay:ApiV3Key"];
+
+                if (string.IsNullOrEmpty(privateKeyPath))
+                {
+                    throw new InvalidOperationException("微信支付配置缺失: AppSetting:WeChatPay:PrivateKeyPath 未设置");
+                }
+
+                return new WeChatPayV3Signer(privateKeyPath, certSerial, apiV3Key);
+            })
+            .AsSelf()
+            .InstancePerLifetimeScope();
+
             builder.RegisterModule(new QuartzAutofacFactoryModule());
         }
-
 
         /// <summary>
         /// 注入所有继承了IDependency接口

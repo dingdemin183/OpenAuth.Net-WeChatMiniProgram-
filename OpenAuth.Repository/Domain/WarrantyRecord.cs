@@ -1,4 +1,7 @@
-﻿using OpenAuth.Repository.Core;
+﻿// OpenAuth.Repository/Domain/WarrantyRecord.cs
+
+using OpenAuth.Repository.Core;
+using OpenAuth.Repository.Enums;
 using SqlSugar;
 using System;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -6,14 +9,31 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace OpenAuth.Repository.Domain
 {
     /// <summary>
-    /// 报修单表
+    /// 延保记录表
     /// </summary>
-    [Table("repair_order")]
-    [SugarTable("repair_order")]
-    public class RepairOrder : StringEntity
+    [Table("warranty_record")]
+    [SugarTable("warranty_record")]
+    public class WarrantyRecord : StringEntity
     {
         /// <summary>
-        /// 用户ID（关联sys_user_external_auth.Id）
+        /// 订单号（业务唯一）
+        /// </summary>
+        [SugarColumn(Length = 32)]
+        public string OrderNo { get; set; }
+
+        /// <summary>
+        /// 微信支付交易单号
+        /// </summary>
+        [SugarColumn(Length = 64)]
+        public string TransactionId { get; set; }
+
+        /// <summary>
+        /// 支付时间
+        /// </summary>
+        public DateTime? PayTime { get; set; }
+
+        /// <summary>
+        /// 用户ID
         /// </summary>
         [SugarColumn(Length = 50)]
         public string UserId { get; set; }
@@ -49,83 +69,70 @@ namespace OpenAuth.Repository.Domain
         public string ProductModel { get; set; }
 
         /// <summary>
-        /// 故障描述
+        /// 产品购买日期
         /// </summary>
-        [SugarColumn(ColumnDataType = "TEXT")]
-        public string FaultDesc { get; set; }
+        public DateTime PurchaseDate { get; set; }
 
         /// <summary>
-        /// 购买日期
+        /// 能效照片URL
         /// </summary>
-        public DateTime? PurchaseDate { get; set; }
-
-     
         [SugarColumn(Length = 500)]
         public string EnergyImage { get; set; }
 
         /// <summary>
-        /// 整机照片URL
-        /// </summary>
-        [SugarColumn(Length = 500)]
-        public string ProductImage { get; set; }
-
-        /// <summary>
-        /// 交易图片URL
+        /// 交易照片URL
         /// </summary>
         [SugarColumn(Length = 500)]
         public string TradeImage { get; set; }
 
         /// <summary>
-        /// 省份
+        /// 延保年限
         /// </summary>
-        [SugarColumn(Length = 50)]
-        public string Province { get; set; }
-        /// <summary>
-        /// 城市
-        /// </summary>
-        [SugarColumn(Length = 50)]
-        public string City { get; set; }
-
+        public int WarrantyYears { get; set; } = 3;
 
         /// <summary>
-        /// 区/县
+        /// 支付金额
         /// </summary>
-        [SugarColumn(Length = 50)]
-        public string Area { get; set; }
-
+        public decimal Amount { get; set; }
 
         /// <summary>
-        /// 详细地址
+        /// 生效日期
         /// </summary>
-        [SugarColumn(Length = 200)]
-        public string DetailAddress { get; set; }
+        public DateTime? StartDate { get; set; }
 
         /// <summary>
-        /// 处理状态 0-拒绝报修 1-同意报修
+        /// 到期日期
         /// </summary>
-        public int Status { get; set; } = 1;
+        public DateTime? EndDate { get; set; }
 
         /// <summary>
-        /// 处理备注
+        /// 订单状态：0-待支付，1-已支付，2-生效中，3-已过期，4-已退款，5-退款失败
         /// </summary>
-        [SugarColumn(ColumnDataType = "TEXT")]
-        public string Remark { get; set; }
+        public WarrantyStatusEnum OrderStatus { get; set; } = WarrantyStatusEnum.Pending;
 
         /// <summary>
-        /// 处理人ID
+        /// 审核备注
         /// </summary>
-        [SugarColumn(Length = 50)]
-        public string HandlerId { get; set; }
+        [SugarColumn(Length = 500)]
+        public string AuditRemark { get; set; }
 
         /// <summary>
-        /// 处理时间
+        /// 退款单号
         /// </summary>
-        public DateTime? HandledTime { get; set; }
+        [SugarColumn(Length = 32)]
+        public string RefundNo { get; set; }
+
+        /// <summary>
+        /// 微信退款单号
+        /// </summary>
+        [SugarColumn(Length = 32)]
+        public string RefundId { get; set; }
 
         /// <summary>
         /// 创建时间
         /// </summary>
         public DateTime CreateTime { get; set; } = DateTime.Now;
+
         /// <summary>
         /// 更新时间
         /// </summary>

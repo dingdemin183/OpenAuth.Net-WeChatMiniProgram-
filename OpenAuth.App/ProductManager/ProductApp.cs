@@ -24,8 +24,10 @@ namespace OpenAuth.App.ProductManager
             _db = db;
         }
 
+        #region 后台商品管理
+
         /// <summary>
-        /// 添加或编辑商品
+        /// 后台添加商品
         /// </summary>
         /// <param name="req">请求参数</param>
         /// <returns></returns>
@@ -48,33 +50,29 @@ namespace OpenAuth.App.ProductManager
             {
                 throw new Exception("商品淘宝链接不能为空");
             }
-            if(req.Price<0)
+            if (!Uri.IsWellFormedUriString(req.TaobaoLink, UriKind.Absolute))
+                throw new CommonException("淘宝链接格式不正确");
+            if (req.Price<0)
             {
                 throw new Exception("商品价格错误");
             }
-            try
+
+            var product = new Product
             {
-                var product = new Product
-                {
-                    Id = Guid.NewGuid().ToString("N"),
-                    Name = req.Name,
-                    Price = req.Price,
-                    ImageUrl = req.ImageUrl,
-                    TaobaoLink = req.TaobaoLink,
-                    Status = req.Status,
-                    CreateTime = DateTime.Now,
-                    IsDeleted = false
-                };
-                await _db.Insertable(product)
-                    .ExecuteCommandAsync()
-                    .ConfigureAwait(false);
-                return product.Id;
-            }
-            catch (Exception ex)
-            {
-                throw new Exception("新增商品失败：" + ex.Message);
-            }
-       
+                Id = Guid.NewGuid().ToString("N"),
+                Name = req.Name,
+                Price = req.Price,
+                ImageUrl = req.ImageUrl,
+                TaobaoLink = req.TaobaoLink,
+                Status = req.Status,
+                CreateTime = DateTime.Now,
+                IsDeleted = false
+            };
+            await _db.Insertable(product)
+                .ExecuteCommandAsync()
+                .ConfigureAwait(false);
+            return product.Id;
+
         }
 
         /// <summary>
@@ -102,76 +100,68 @@ namespace OpenAuth.App.ProductManager
             {
                 throw new Exception("商品淘宝链接不能为空");
             }
+
             if (req.Price < 0)
             {
                 throw new Exception("商品价格错误");
             }
-            try
-            {
-                // 编辑
-                var product = await _db.Queryable<Product>()
-                                 .Where(u => u.Id == req.Id && !u.IsDeleted)
-                                 .FirstAsync()
-                                 .ConfigureAwait(false);
+            // 编辑
+            var product = await _db.Queryable<Product>()
+                             .Where(u => u.Id == req.Id && !u.IsDeleted)
+                             .FirstAsync()
+                             .ConfigureAwait(false);
 
-                if (product == null)
-                    throw new Exception("商品不存在");
+            if (product == null)
+                throw new Exception("商品不存在");
 
-                product.Name = req.Name;
-                product.Price = req.Price;
-                product.ImageUrl = req.ImageUrl;
-                product.TaobaoLink = req.TaobaoLink;
-                product.Status = req.Status;
-                product.UpdateTime = DateTime.Now;
+            product.Name = req.Name;
+            product.Price = req.Price;
+            product.ImageUrl = req.ImageUrl;
+            product.TaobaoLink = req.TaobaoLink;
+            product.Status = req.Status;
+            product.UpdateTime = DateTime.Now;
 
-                await _db.Updateable(product)
-                         .UpdateColumns(x => new { x.Name, x.Price, x.ImageUrl, x.Status, x.UpdateTime ,x.TaobaoLink})
-                         .ExecuteCommandAsync()
-                         .ConfigureAwait(false);
-                return product.Id;
-            }
-            catch (Exception ex)
-            {
-                throw new Exception("编辑商品失败：" + ex.Message);
-            }
+            await _db.Updateable(product)
+                     .UpdateColumns(x => new { x.Name, x.Price, x.ImageUrl, x.Status, x.UpdateTime, x.TaobaoLink })
+                     .ExecuteCommandAsync()
+                     .ConfigureAwait(false);
+            return product.Id;
         }
 
 
         /// <summary>
-        /// 删除商品（软删除）
+        /// 批量删除商品（软删除）
         /// </summary>
         /// <param name="id">商品id</param>
         /// <returns></returns>
         /// <exception cref="Exception"></exception>
-        public async Task Delete(string id)
+        public async Task Delete(DeleteProductReq req)
         {
-            //参数校验
-            if(string.IsNullOrEmpty(id))
-            {
-                throw new Exception("商品Id不能为空");
-            }
-            try
-            {
-                var product = await _db.Queryable<Product>()
-                                    .Where(u => u.Id == id && !u.IsDeleted)
-                                    .FirstAsync()
+            // 参数校验
+            if (req.Ids == null || req.Ids.Length == 0)
+                throw new CommonException("商品Id不能为空");
+
+            // 批量查询
+            var products = await _db.Queryable<Product>()
+                                    .Where(u => req.Ids.Contains(u.Id) && !u.IsDeleted)
+                                    .ToListAsync()
                                     .ConfigureAwait(false);
 
-                if (product == null)
-                    throw new Exception("商品不存在");
+            if (products == null || products.Count == 0)
+                throw new CommonException("商品不存在或已删除");
 
-                product.IsDeleted = true;
-                product.UpdateTime = DateTime.Now;
-                await  _db.Updateable(product)
-                          .UpdateColumns(p => new { p.IsDeleted, p.UpdateTime })
-                          .ExecuteCommandAsync()
-                          .ConfigureAwait(false);
-            }
-            catch (Exception ex)
+            // 批量更新
+            var updateTime = DateTime.Now;
+            foreach (var product in products)
             {
-                throw new Exception("删除商品失败：" + ex.Message);
+                product.IsDeleted = true;
+                product.UpdateTime = updateTime;
             }
-
+            
+            await _db.Updateable(products)
+                     .UpdateColumns(p => new { p.IsDeleted, p.UpdateTime })
+                     .ExecuteCommandAsync()
+                     .ConfigureAwait(false);
         }
 
         /// <summary>
@@ -208,15 +198,18 @@ namespace OpenAuth.App.ProductManager
         }
 
         /// <summary>
-        /// 上架商品
+        /// 管理员上架商品
         /// </summary>
+        /// <param name="id">商品id</param>
+        /// <returns></returns>
+        /// <exception cref="Exception"></exception>
         public async Task OnShelf(string id)
         {
-            if(string.IsNullOrEmpty(id))
+            if (string.IsNullOrEmpty(id))
             {
                 throw new Exception("商品Id不能为空");
             }
-
+          
             var product = await _db.Queryable<Product>()
                                 .Where(u => u.Id == id && !u.IsDeleted)
                                 .FirstAsync()
@@ -234,8 +227,10 @@ namespace OpenAuth.App.ProductManager
         }
 
         /// <summary>
-        /// 后台管理列表（分页查询）
+        ///  后台分页查询所有商品列表
         /// </summary>
+        /// <param name="req"></param>
+        /// <returns></returns>
         public async Task<TableResp<ProductAdminResp>> QueryAdminAsync(QueryProductListReq req)
         {
             var query = _db.Queryable<Product>()
@@ -258,6 +253,7 @@ namespace OpenAuth.App.ProductManager
                 TaobaoLink = x.TaobaoLink,
                 Status = x.Status
             }).ToList();
+
             return new TableResp<ProductAdminResp>
             {
                 Data = data,
@@ -268,8 +264,41 @@ namespace OpenAuth.App.ProductManager
         }
 
         /// <summary>
-        /// 小程序端商品列表（只返回上架商品）
+        /// 根据Id获取商品详情
         /// </summary>
+        /// <param name="id">商品id</param>
+        /// <returns>商品详细信息</returns>
+        /// <exception cref="Exception"></exception>
+        public async Task<ProductAdminResp> GetForMiniProgramAsync(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                throw new Exception("商品Id不能为空");
+            }
+            var result = await _db.Queryable<Product>()
+                .Where(p => p.Id == id && !p.IsDeleted && p.Status == 1)
+                .Select(p => new ProductAdminResp
+                {
+                    Id = p.Id, 
+                    Name = p.Name,
+                    Price = p.Price,
+                    ImageUrl = p.ImageUrl,
+                    TaobaoLink = p.TaobaoLink,
+                    Status = p.Status
+                    
+                })
+                .FirstAsync()
+                .ConfigureAwait(false);
+            return result;
+        }
+        #endregion 后台管理
+
+        #region 小程序 商品
+
+        /// <summary>
+        ///  小程序端商品列表（只返回上架商品）
+        /// </summary>
+        /// <returns></returns>
         public async Task<List<ProductMiniProgramResp>> QueryForMiniProgramAsync()
         {
             var result= await _db.Queryable<Product>()
@@ -288,28 +317,7 @@ namespace OpenAuth.App.ProductManager
             return result;
         }
 
-        /// <summary>
-        /// 根据Id获取商品详情
-        /// </summary>
-        public async Task<ProductMiniProgramResp> GetForMiniProgramAsync(string id)
-        {
-            if(string.IsNullOrEmpty(id))
-            {
-                throw new Exception("商品Id不能为空");
-            }
-            var result= await _db.Queryable<Product>()
-                .Where(p => p.Id == id && !p.IsDeleted && p.Status == 1)
-                .Select(p => new ProductMiniProgramResp
-                {
-                    Id = p.Id,
-                    Name = p.Name,
-                    Price = p.Price,
-                    ImageUrl = p.ImageUrl,
-                    TaobaoLink = p.TaobaoLink
-                })
-                .FirstAsync()
-                .ConfigureAwait(false);
-            return result;
-        }
+       
+        #endregion 小程序
     }
 }

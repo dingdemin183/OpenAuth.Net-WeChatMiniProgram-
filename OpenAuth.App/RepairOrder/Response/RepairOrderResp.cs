@@ -66,29 +66,16 @@ namespace OpenAuth.App.Response
         public string Province { get; set; }
 
         /// <summary>
-        /// 省份编号
-        /// </summary>
-        public int? ProvinceId { get; set; }
-
-        /// <summary>
         /// 城市
         /// </summary>
         public string City { get; set; }
 
-        /// <summary>
-        /// 城市编号
-        /// </summary>
-        public int? CityId { get; set; }
 
         /// <summary>
         /// 区/县
         /// </summary>
-        public string District { get; set; }
+        public string Area { get; set; }
 
-        /// <summary>
-        /// 区编号
-        /// </summary>
-        public int? DistrictId { get; set; }
 
         /// <summary>
         /// 详细地址
@@ -97,7 +84,7 @@ namespace OpenAuth.App.Response
 
 
         /// <summary>
-        /// 状态：0-待处理，1-处理中，2-已解决，3-已关闭
+        /// 状态：0-拒绝报修，1-同意报修，2-未处理
         /// </summary>
         public int Status { get; set; }
 

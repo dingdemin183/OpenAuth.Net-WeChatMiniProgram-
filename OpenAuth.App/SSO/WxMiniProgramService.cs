@@ -53,7 +53,7 @@ namespace OpenAuth.App.SSO
             var json = await response.Content.ReadAsStringAsync();
 
             _logger.LogDebug($"微信接口返回: {json}");
-
+           
             var result = JsonSerializer.Deserialize<WxJscode2SessionResponse>(json);
 
             if (result.ErrCode != 0 && result.ErrCode != default)
@@ -69,15 +69,15 @@ namespace OpenAuth.App.SSO
         /// </summary>
         public async Task<WxPhoneResponse> GetUserPhoneAsync(string code)
         {
-            // 1. 获取 access_token
+            //  获取 access_token
             var accessToken = await _accessTokenService.GetAccessTokenAsync();
 
-            // 2. 调用微信手机号接口
+            //  调用微信手机号接口
             var url = $"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={accessToken}";
 
             var requestBody = new { code = code };
             var content = new StringContent(
-                System.Text.Json.JsonSerializer.Serialize(requestBody),
+                System.Text.Json.JsonSerializer.Serialize(requestBody), 
                 System.Text.Encoding.UTF8,
                 "application/json");
 
@@ -86,8 +86,9 @@ namespace OpenAuth.App.SSO
             var json = await response.Content.ReadAsStringAsync();
 
             _logger.LogWarning($"获取手机号接口返回: {json}");
-
-            var result = System.Text.Json.JsonSerializer.Deserialize<WxPhoneResponse>(json);
+          
+            //var result = System.Text.Json.JsonSerializer.Deserialize<WxPhoneResponse>(json);
+            var result = JsonSerializer.Deserialize<WxPhoneResponse>(json);
 
             if (result.ErrCode != 0)
             {

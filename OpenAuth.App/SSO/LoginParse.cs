@@ -115,21 +115,18 @@ namespace OpenAuth.App.SSO
         }
 
         /// <summary>
-        /// 微信小程序登录
+        /// 微信小程序一键登录（登录 + 获取手机号，一次完成）
         /// </summary>
-        /// <param name="model">请求参数 code</param>
-        /// <returns></returns>
-        public async Task<LoginResult> WxMiniProgramLoginAsync(WxMiniProgramLoginRequest model)
+        public async Task<LoginResult> WxMiniProgramLoginWithPhoneAsync(WxMiniProgramLoginWithPhoneRequest model, string userIp)
         {
             var result = new LoginResult();
             try
             {
-                //  调用微信接口换取 openid
-                var wxResult = await _wxService.GetOpenIdAndSessionKeyAsync(model.Code);
+                // 用 loginCode 换 openid 
+                var wxSessionResult = await _wxService.GetOpenIdAndSessionKeyAsync(model.LoginCode);
 
-     
-                var openId = wxResult.OpenId;
-                var sessionKey = wxResult.SessionKey;
+                var openId = wxSessionResult.OpenId;
+                var sessionKey = wxSessionResult.SessionKey;
 
                 if (string.IsNullOrEmpty(openId))
                 {
@@ -138,20 +135,44 @@ namespace OpenAuth.App.SSO
                     return result;
                 }
 
-                //  根据 openid 查找或创建用户（直接操作 SysUserExternalAuth 表）
-                var userAuth = await GetOrCreateUserAuthAsync(openId, wxResult.UnionId, sessionKey);
+                // 用 phoneCode 换手机号
+                var phoneResult = await _wxService.GetUserPhoneAsync(model.PhoneCode);
 
-                var userId = userAuth.Id; // 这里的 userId 是 SysUserExternalAuth 表的主键
+                if (phoneResult.ErrCode != 0)
+                {
+                    result.Code = 500;
+                    result.Message = $"获取手机号失败: {phoneResult.ErrMsg}";
+                    return result;
+                }
 
-                // 生成 Session 和 JWT Token（复用原逻辑）
+                var phoneNumber = phoneResult.PhoneInfo?.PhoneNumber;
+                //其他获取手机号方式
+                phoneNumber = phoneResult.PhoneInfo.PurePhoneNumber;
+                
+
+
+
+                if (string.IsNullOrEmpty(phoneNumber))
+                {
+
+
+                    result.Code = 500;
+                    result.Message = "获取手机号失败，返回数据为空";
+                    return result;
+                }
+
+                //根据 openid 查找或创建用户，并保存手机号 
+                var userAuth = await GetOrCreateUserAuthWithPhoneAsync(openId, phoneNumber, wxSessionResult.UnionId, sessionKey,userIp);
+
+                // 生成 Session 和 JWT Token 
                 var sessionId = Guid.NewGuid().ToString("N");
                 var expireDays = _appConfiguration.Value.JwtExpireDays;
 
                 var currentSession = new UserAuthSession
                 {
-                    Account = openId, // 用 openid 作为账号
+                    Account = openId,
                     Name = userAuth.NickName ?? $"微信用户_{openId.Substring(0, 6)}",
-                    UserId=userId,
+                    UserId = userAuth.Id,
                     Token = sessionId,
                     AppKey = "miniprogram",
                     CreateTime = TimeHelper.Now
@@ -160,57 +181,56 @@ namespace OpenAuth.App.SSO
                 _cacheContext.Set(sessionId, currentSession, TimeHelper.Now.AddDays(expireDays));
 
                 var jwtToken = JwtTokenHelper.GenerateToken(
-                    openId, // 用 openid 作为账号
+                    openId,
                     currentSession.Name,
-                     "miniprogram",
+                    "miniprogram",
                     sessionId,
                     _appConfiguration.Value.JwtSecret,
                     expireDays
                 );
-
                 result.Code = 200;
                 result.Token = jwtToken;
                 result.Message = "登录成功";
+                result.Data = phoneNumber;
+
+                _logger.LogInformation($"微信一键登录成功: openId={openId}, phone={phoneNumber}");
             }
             catch (Exception ex)
             {
                 result.Code = 500;
                 result.Message = ex.Message;
-                _logger.LogError($"微信登录异常: {ex.Message}");
+                _logger.LogError($"微信一键登录异常: {ex.Message}");
             }
 
             return result;
         }
 
         /// <summary>
-        /// 根据 OpenId 查找或创建用户（SysUserExternalAuth 表）
+        /// 根据 OpenId 查找或创建用户，并保存手机号
         /// </summary>
-        /// <param name="openId"></param>
-        /// <param name="unionId"></param>
-        /// <param name="sessionKey"></param>
-        /// <returns></returns>
-        private async Task<SysUserExternalAuth> GetOrCreateUserAuthAsync(
+        private async Task<SysUserExternalAuth> GetOrCreateUserAuthWithPhoneAsync(
             string openId,
+            string phoneNumber,
             string unionId,
-            string sessionKey)
+            string sessionKey,
+            string userIp)
         {
-            //  查询是否存在
+            // 查询是否存在
             var existing = SugarClient.Queryable<SysUserExternalAuth>()
                 .First(x => x.Provider == "WeChatMiniProgram" && x.OpenId == openId && !x.IsDeleted);
 
             if (existing != null)
             {
-                // 更新 session_key
-                if (!string.IsNullOrEmpty(sessionKey))
-                {
-                    existing.SessionKey = sessionKey;
-                    existing.UpdateTime = DateTime.Now;
-                    SugarClient.Updateable(existing).ExecuteCommand();
-                }
+                // 更新手机号和 session_key
+                existing.UserPhone = phoneNumber;
+                existing.SessionKey = sessionKey;
+                existing.UpdateTime = DateTime.Now;
+                existing.LastLoginIp = userIp;
+                SugarClient.Updateable(existing).ExecuteCommand();
                 return existing;
             }
 
-            // 不存在 则自动注册新用户
+            // 不存在则自动注册新用户
             var newAuth = new SysUserExternalAuth
             {
                 Id = Guid.NewGuid().ToString("N"),
@@ -218,15 +238,19 @@ namespace OpenAuth.App.SSO
                 OpenId = openId,
                 UnionId = unionId,
                 SessionKey = sessionKey,
+                UserPhone = phoneNumber,  // 直接存手机号
                 NickName = $"微信用户_{openId.Substring(0, 6)}",
+                LastLoginIp=userIp,
                 CreateTime = DateTime.Now,
                 IsDeleted = false
             };
 
-           await  SugarClient.Insertable(newAuth).ExecuteCommandAsync().ConfigureAwait(false);
+            await SugarClient.Insertable(newAuth).ExecuteCommandAsync().ConfigureAwait(false);
 
             return newAuth;
         }
+
+       
 
         /// <summary>
         /// 更新用户手机号

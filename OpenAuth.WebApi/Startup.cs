@@ -86,8 +86,8 @@ namespace OpenAuth.WebApi
             }
 
             // 只在开发环境中添加swagger
-            if (Environment.IsDevelopment())
-            {
+            //if (Environment.IsDevelopment())
+            //{
                 services.AddSwaggerGen(option =>
                 {
                     foreach (var controller in GetControllers())
@@ -134,7 +134,7 @@ namespace OpenAuth.WebApi
                         option.OperationFilter<AuthResponsesOperationFilter>();
                     }
                 });
-            }
+            //}
             services.Configure<AppSetting>(Configuration.GetSection("AppSetting"));
             services.AddControllers(option => { option.Filters.Add<OpenAuthFilter>(); })
                 .ConfigureApiBehaviorOptions(options =>

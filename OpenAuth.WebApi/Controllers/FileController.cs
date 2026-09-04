@@ -25,8 +25,10 @@ namespace OpenAuth.WebApi.Controllers
         }
 
         /// <summary>
-        /// 上传产品主图
+        ///  上传图片
         /// </summary>
+        /// <param name="file">文件</param>
+        /// <returns></returns>
         [HttpPost]
         [AllowAnonymous]
         public async Task<Response<UploadFileResp>> UploadProductImage([FromForm] IFormFile file)
@@ -52,24 +54,5 @@ namespace OpenAuth.WebApi.Controllers
         }
     }
 
-    /// <summary>
-    /// 上传文件响应
-    /// </summary>
-    public class UploadFileResp
-    {
-        /// <summary>
-        /// 文件地址
-        /// </summary>
-        public string Url { get; set; }
-
-        /// <summary>
-        /// 文件名称
-        /// </summary>
-        public string FileName { get; set; }
-
-        /// <summary>
-        /// 文件大小
-        /// </summary>
-        public long FileSize { get; set; }
-    }
+    
 }

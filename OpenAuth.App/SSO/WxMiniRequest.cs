@@ -6,15 +6,19 @@ using System.Text.Json.Serialization;
 namespace OpenAuth.App.SSO
 {
     /// <summary>
-    /// 微信小程序登录请求
+    /// 微信小程序一键登录请求参数
     /// </summary>
-    public class WxMiniProgramLoginRequest
+    public class WxMiniProgramLoginWithPhoneRequest
     {
         /// <summary>
-        /// 微信登录凭证（wx.login 返回的 code）
+        /// 微信登录 code（从 wx.login 获取）
         /// </summary>
-        public string Code { get; set; }
+        public string LoginCode { get; set; }
 
+        /// <summary>
+        /// 手机号获取 code（从 getPhoneNumber 回调获取）
+        /// </summary>
+        public string PhoneCode { get; set; }
     }
 
     /// <summary>

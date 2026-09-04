@@ -45,7 +45,7 @@ namespace OpenAuth.App.SSO
             }
 
             // 缓存没有，调用微信接口获取
-            var appId = _appConfiguration.Value.WeChatMiniProgram.AppId;
+            var appId = _appConfiguration.Value.WeChatMiniProgram.AppId;  // 从配置中获取 AppId 是最新的
             var appSecret = _appConfiguration.Value.WeChatMiniProgram.AppSecret;
 
             var url = $"https://api.weixin.qq.com/cgi-bin/token" +

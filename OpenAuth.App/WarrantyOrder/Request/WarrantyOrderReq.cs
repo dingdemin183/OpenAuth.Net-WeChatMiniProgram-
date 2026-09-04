@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text.Json.Serialization;
 
 namespace OpenAuth.App.Request
 {
@@ -8,6 +9,11 @@ namespace OpenAuth.App.Request
     public class CreateWarrantyPayOrderReq
     {
         /// <summary>
+        /// 二次支付时传订单号，首次支付时不传
+        /// </summary>
+        public string OrderNo { get; set; }
+
+        /// <summary>
         /// 姓名
         /// </summary>
         public string UserName { get; set; }
@@ -16,11 +22,6 @@ namespace OpenAuth.App.Request
         /// 手机号码
         /// </summary>
         public string Phone { get; set; }
-
-        /// <summary>
-        /// 商品名称
-        /// </summary>
-        public string ProductName { get; set; }
 
         /// <summary>
         /// 产品品牌
@@ -40,17 +41,12 @@ namespace OpenAuth.App.Request
         /// <summary>
         /// 购买日期
         /// </summary>
-        public DateTime? PurchaseDate { get; set; }
+        public DateTime PurchaseDate { get; set; }
 
         /// <summary>
         /// 能效照片URL
         /// </summary>
         public string EnergyImage { get; set; }
-
-        /// <summary>
-        /// 整机照片URL
-        /// </summary>
-        public string ProductImage { get; set; }
 
         /// <summary>
         /// 交易图片URL
@@ -63,64 +59,85 @@ namespace OpenAuth.App.Request
         public int WarrantyYears { get; set; }
 
         /// <summary>
-        /// 支付金额
+        /// 支付金额(元）
         /// </summary>
         public decimal Amount { get; set; }
     }
 
     /// <summary>
-    /// 微信支付统一下单请求参数
+    /// V3 统一下单请求参数（只保留必填）
     /// </summary>
-    public class WeChatPayUnifiedOrderReq
+    public class UnifiedOrderReq
     {
         /// <summary>
-        /// 应用ID
+        /// 公众账号ID（必填）
         /// </summary>
+        [JsonPropertyName("appid")]
         public string AppId { get; set; }
 
         /// <summary>
-        /// 商户号
+        /// 商户号（必填）
         /// </summary>
+        [JsonPropertyName("mchid")]
         public string MchId { get; set; }
 
         /// <summary>
-        /// 商品描述
+        /// 商品描述（必填）
         /// </summary>
-        public string Body { get; set; }
+        [JsonPropertyName("description")]
+        public string Description { get; set; }
 
         /// <summary>
-        /// 商户订单号
+        /// 商户订单号（必填，6-32位）
         /// </summary>
+        [JsonPropertyName("out_trade_no")]
         public string OutTradeNo { get; set; }
 
         /// <summary>
-        /// 标价金额(分)
+        /// 商户回调地址（必填）
         /// </summary>
-        public int TotalFee { get; set; }
-
-        /// <summary>
-        /// 终端IP
-        /// </summary>
-        public string SpbillCreateIp { get; set; }
-
-        /// <summary>
-        /// 通知地址
-        /// </summary>
+        [JsonPropertyName("notify_url")]
         public string NotifyUrl { get; set; }
 
         /// <summary>
-        /// 交易类型
+        /// 订单金额（必填）
         /// </summary>
-        public string TradeType { get; set; } = "JSAPI";
+        [JsonPropertyName("amount")]
+        public WeChatPayV3Amount Amount { get; set; }
 
         /// <summary>
-        /// 用户标识(小程序openid)
+        /// 支付者信息（必填）
         /// </summary>
+        [JsonPropertyName("payer")]
+        public WeChatPayV3Payer Payer { get; set; }
+    }
+
+    /// <summary>
+    /// 订单金额
+    /// </summary>
+    public class WeChatPayV3Amount
+    {
+        /// <summary>
+        /// 总金额（分，必填）
+        /// </summary>
+        [JsonPropertyName("total")]
+        public int Total { get; set; }
+    }
+
+    /// <summary>
+    /// 支付者信息
+    /// </summary>
+    public class WeChatPayV3Payer
+    {
+        /// <summary>
+        /// 用户openid（必填）
+        /// </summary>
+        [JsonPropertyName("openid")]
         public string OpenId { get; set; }
     }
 
     /// <summary>
-    /// 微信支付回调请求
+    /// 微信支付回调请求（V3 版）
     /// </summary>
     public class WeChatPayCallbackReq
     {
@@ -140,18 +157,27 @@ namespace OpenAuth.App.Request
         public int TotalFee { get; set; }
 
         /// <summary>
-        /// 回调原始数据(XML)
+        /// 回调原始数据（V3 是 JSON）
         /// </summary>
         public string CallbackData { get; set; }
     }
 
     /// <summary>
-    /// 微信支付返回参数(用于前端调起支付)
+    /// V3 统一下单响应
     /// </summary>
-    public class WeChatPayResultResp
+    public class UnifiedOrderResp
+    {
+        [JsonPropertyName("prepay_id")]
+        public string PrepayId { get; set; }
+    }
+
+    /// <summary>
+    /// 前端调起支付接口所需参数模型
+    /// </summary>
+    public class WeChatPayResp
     {
         /// <summary>
-        /// 小程序appId
+        /// 应用ID
         /// </summary>
         public string AppId { get; set; }
 
@@ -166,23 +192,18 @@ namespace OpenAuth.App.Request
         public string NonceStr { get; set; }
 
         /// <summary>
-        /// 订单详情扩展字符串(包含prepay_id)
+        /// prepay_id参数值
         /// </summary>
         public string Package { get; set; }
 
         /// <summary>
-        /// 签名方式
+        /// 签名类型，默认为RSA
         /// </summary>
-        public string SignType { get; set; } = "MD5";
+        public string SignType { get; set; } = "RSA";
 
         /// <summary>
-        /// 支付签名
+        /// 签名值
         /// </summary>
         public string PaySign { get; set; }
-
-        /// <summary>
-        /// 订单号
-        /// </summary>
-        public string OrderNo { get; set; }
     }
 }
