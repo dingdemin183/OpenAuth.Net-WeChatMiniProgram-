@@ -75,6 +75,17 @@ namespace Infrastructure
     {
         public string AppId { get; set; }
         public string AppSecret { get; set; }
+
+
+        /// <summary>
+        /// 消息推送Token（用于验证微信回调）
+        /// </summary>
+        public string Token { get; set; }
+
+        /// <summary>
+        /// 消息加解密密钥（用于安全模式）
+        /// </summary>
+        public string EncodingAESKey { get; set; }
     }
 
 
@@ -99,17 +110,12 @@ namespace Infrastructure
         public string SerialNo { get; set; }
 
         /// <summary>
-        /// 商户私钥文件路径（apiclient_key.pem，PKCS#8 格式）
+        /// 商户API私钥文件路径（apiclient_key.pem，PKCS#8 格式）
         /// </summary>
         public string PrivateKeyPath { get; set; }
 
         /// <summary>
-        /// 商户证书文件路径（apiclient_cert.p12，用于退款等需要双向证书的场景）
-        /// </summary>
-        public string CertPath { get; set; }
-
-        /// <summary>
-        /// 微信支付平台证书路径
+        /// 微信支付平台证书路径(微信支付的公钥，用于回调验签）
         /// </summary>
         public string PlatformCertPath { get; set; }
 

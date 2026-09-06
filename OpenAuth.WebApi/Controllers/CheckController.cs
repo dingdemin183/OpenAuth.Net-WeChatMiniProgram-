@@ -52,6 +52,7 @@ namespace OpenAuth.WebApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpGet]
+        [ApiExplorerSettings(IgnoreApi = true)]
         public Response<UserView> GetUserProfile()
         {
             var resp = new Response<UserView>();
@@ -74,7 +75,8 @@ namespace OpenAuth.WebApi.Controllers
         /// <param name="token">The token.</param>
         /// <param name="requestid">备用参数.</param>
         [HttpGet]
-       
+        [ApiExplorerSettings(IgnoreApi = true)]
+
         public Response<bool> GetStatus()
         {
             var result = new Response<bool>();
@@ -94,6 +96,7 @@ namespace OpenAuth.WebApi.Controllers
         /// 获取登录用户的所有可访问的角色
         /// </summary>
         [HttpGet]
+        [ApiExplorerSettings(IgnoreApi = true)]
         public Response<List<Role>> GetRoles()
         {
             var result = new Response<List<Role>>();
@@ -127,6 +130,7 @@ namespace OpenAuth.WebApi.Controllers
         /// <param name="moduleCode">模块的Code，如Category</param>
         /// <returns></returns>
         [HttpGet]
+        [ApiExplorerSettings(IgnoreApi = true)]
         public Response<List<BuilderTableColumn>> GetProperties(string moduleCode)
         {
             var result = new Response<List<BuilderTableColumn>>();
@@ -146,6 +150,7 @@ namespace OpenAuth.WebApi.Controllers
         /// 获取登录用户的所有可访问的组织信息
         /// </summary>
         [HttpGet]
+        [ApiExplorerSettings(IgnoreApi = true)]
         public Response<List<OrgView>> GetOrgs()
         {
             var result = new Response<List<OrgView>>();
@@ -179,6 +184,7 @@ namespace OpenAuth.WebApi.Controllers
         /// <param name="orgId">机构ID</param>
         /// <returns></returns>
         [HttpGet]
+        [ApiExplorerSettings(IgnoreApi = true)]
         public PagedDynamicDataResp GetSubOrgs(string orgId)
         {
             string cascadeId = ".0.";
@@ -211,6 +217,7 @@ namespace OpenAuth.WebApi.Controllers
         /// 获取登录用户的所有可访问的模块及菜单，以列表形式返回结果
         /// </summary>
         [HttpGet]
+        [ApiExplorerSettings(IgnoreApi = true)]
         public Response<List<ModuleView>> GetModules()
         {
             var result = new Response<List<ModuleView>>();
@@ -242,6 +249,7 @@ namespace OpenAuth.WebApi.Controllers
         /// 获取登录用户的所有可访问的模块及菜单，以树状结构返回
         /// </summary>
         [HttpGet]
+        [ApiExplorerSettings(IgnoreApi = true)]
         public Response<IEnumerable<TreeItem<ModuleView>>> GetModulesTree()
         {
             var result = new Response<IEnumerable<TreeItem<ModuleView>>>();
@@ -273,6 +281,7 @@ namespace OpenAuth.WebApi.Controllers
         /// 获取登录用户的所有可访问的资源
         /// </summary>
         [HttpGet]
+        [ApiExplorerSettings(IgnoreApi = true)]
         public Response<List<SysResource>> GetResources()
         {
             var result = new Response<List<SysResource>>();
@@ -304,6 +313,7 @@ namespace OpenAuth.WebApi.Controllers
         /// 根据token获取用户名称
         /// </summary>
         [HttpGet]
+        [ApiExplorerSettings(IgnoreApi = true)]
         public Response<string> GetUserName()
         {
             var result = new Response<string>();

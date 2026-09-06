@@ -37,19 +37,13 @@ namespace OpenAuth.WebApi.Controllers
         [HttpGet]
         public async Task<Response<UserProfileResp>> GetMyProfile()
         {
-            var result = new Response<UserProfileResp>();
-            try
+            var data = await _userProfileApp.GetMyProfileAsync();
+            return new Response<UserProfileResp>
             {
-                var data = await _userProfileApp.GetMyProfileAsync();
-                result.Data = data;
-                result.Message = "获取成功";
-            }
-            catch (Exception ex)
-            {
-                result.Code = 500;
-                result.Message = ex.Message;
-            }
-            return result;
+                Code = 200,
+                Message = "获取成功",
+                Data = data
+            };
         }
 
         /// <summary>
@@ -60,19 +54,26 @@ namespace OpenAuth.WebApi.Controllers
         [HttpPost]
         public async Task<Response<UserProfileResp>> UpdateProfile([FromBody] UpdateUserProfileReq request)
         {
-            var result = new Response<UserProfileResp>();
             try
             {
-                var data = await _userProfileApp.UpdateProfileAsync(request);
-                result.Data = data;
-                result.Message = "更新成功";
+                //var data = await _userProfileApp.UpdateProfileAsync(request);
+                var data = await _userProfileApp.UpdateProfileSyncAsync(request);
+                return new Response<UserProfileResp>
+                {
+                    Code = 200,
+                    Message = data.Message ?? "更新成功",
+                    Data = data
+                };
             }
-            catch (Exception ex)
+            catch (CommonException ex)
             {
-                result.Code = 500;
-                result.Message = ex.Message;
+                return new Response<UserProfileResp>
+                {
+                    Code = 400,
+                    Message = ex.Message,
+                    Data = null
+                };
             }
-            return result;
         }
     }
 }

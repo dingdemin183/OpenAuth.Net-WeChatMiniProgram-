@@ -53,9 +53,11 @@ namespace OpenAuth.App.SSO
             var json = await response.Content.ReadAsStringAsync();
 
             _logger.LogDebug($"微信接口返回: {json}");
-           
-            var result = JsonSerializer.Deserialize<WxJscode2SessionResponse>(json);
 
+           
+           
+            //json = @"{""openid"":""oUpF8uMuAJO_M2pxb1Q9zNjWeS678uho"",""session_key"":""tiihtNczf5v6AKRyjwEUhQ=="",""unionid"":""o6_bmasdasdsad6_2sgVt7hMZOPfL"",""errcode"":0,""errmsg"":""""}";
+            var result = JsonSerializer.Deserialize<WxJscode2SessionResponse>(json);
             if (result.ErrCode != 0 && result.ErrCode != default)
             {
                 _logger.LogWarning($"微信接口返回: {json}");
@@ -86,7 +88,8 @@ namespace OpenAuth.App.SSO
             var json = await response.Content.ReadAsStringAsync();
 
             _logger.LogWarning($"获取手机号接口返回: {json}");
-          
+            //json = "{\"errcode\":0,\"errmsg\":\"ok\",\"phone_info\":{\"phoneNumber\":\"13800138000\",\"purePhoneNumber\":\"13800138000\",\"countryCode\":\"86\",\"watermark\":{\"timestamp\":1634567890,\"appid\":\"wx1234567890abcdef\"}}}";
+
             //var result = System.Text.Json.JsonSerializer.Deserialize<WxPhoneResponse>(json);
             var result = JsonSerializer.Deserialize<WxPhoneResponse>(json);
 

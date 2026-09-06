@@ -50,9 +50,59 @@ namespace OpenAuth.App.Warranty
 
         }
 
-        // OpenAuth.App/Warranty/WarrantyApp.cs
+        /// <summary>
+        /// 后台查询延保卡列表（支持分页、模糊查询、状态筛选、时间范围）
+        /// </summary>
+        public async Task<TableResp<WarrantyCardResp>> QueryWarrantyCardsAsync(QueryWarrantyCardsReq req)
+        {
+            var query = _db.Queryable<WarrantyRecord>()
+                .Where(r => !r.IsDeleted);
 
-       
+            // 订单状态筛选
+            if (req.OrderStatus.HasValue)
+            {
+                var statusEnum = (WarrantyStatusEnum)req.OrderStatus.Value;
+                query = query.Where(r => r.OrderStatus == statusEnum);
+            }
+
+            // 关键词查询
+            if (!string.IsNullOrWhiteSpace(req.Key))
+            {
+                query = query.Where(r => req.Key.Contains(r.UserId)||req.Key.Contains(r.UserName)
+                                        ||req.Key.Contains(r.UserName)||req.Key.Contains(r.OrderNo));
+            }
+
+            // 创建时间范围筛选
+            if (req.StartTime.HasValue)
+            {
+                var start = req.StartTime.Value.Date;
+                query = query.Where(r => r.CreateTime >= start);
+            }
+            if (req.EndTime.HasValue)
+            {
+                var end = req.EndTime.Value.Date.AddDays(1).AddSeconds(-1);
+                query = query.Where(r => r.CreateTime <= end);
+            }
+            // 简单修复：忽略 sort 参数，使用固定排序
+            query = query.OrderByDescending(r => r.CreateTime);
+
+            // 分页查询
+            var total = await query.CountAsync().ConfigureAwait(false);
+            var list = await query.ToPageListAsync(req.Page, req.Limit).ConfigureAwait(false);
+
+            // 映射为响应对象
+            var data = list.Select(c => MapToCardResp(c)).ToList();
+
+            return new TableResp<WarrantyCardResp>
+            {
+                Data = data,
+                Count = total,
+                Page = req.Page,
+                Limit = req.Limit
+            };
+        }
+
+
 
         #region 订单相关
 
@@ -316,7 +366,7 @@ namespace OpenAuth.App.Warranty
                         }
                     };
                     //调用新版 V3 退款接口
-                    var refundResult = await _wxPayRefundService.CreateRefundAsync(refundReq,config);
+                    var refundResult = await _wxPayRefundService.CreateRefundAsync(refundReq);
 
                     // 退款已发起，等待微信回调
                     _logger.LogInformation($"退款已发起：订单{order.OrderNo}，退款单号{refundNo}，等待回调");
@@ -412,24 +462,16 @@ namespace OpenAuth.App.Warranty
         {
             if (string.IsNullOrWhiteSpace(orderNo))
                 throw new CommonException("延保卡订单号不能为空");
+            var card = await _db.Queryable<WarrantyRecord>()
+              .Where(c => c.OrderNo == orderNo && !c.IsDeleted)
+              .FirstAsync()
+              .ConfigureAwait(false);
 
-            try
-            {
-                var card = await _db.Queryable<WarrantyRecord>()
-               .Where(c => c.OrderNo == orderNo && !c.IsDeleted)
-               .FirstAsync()
-               .ConfigureAwait(false);
+            if (card == null)
+                throw new CommonException("延保卡不存在");
 
-                if (card == null)
-                    throw new CommonException("延保卡不存在");
-
-                return MapToCardResp(card);
-
-            }
-            catch (Exception ex)
-            {
-                throw new CommonException("获取延保卡信息失败");
-            }
+            return MapToCardResp(card);
+    
            
         }
 
@@ -439,27 +481,23 @@ namespace OpenAuth.App.Warranty
         public async Task<List<WarrantyCardResp>> GetUserCardsAsync(string userId)
         {
 
-            //if (string.IsNullOrWhiteSpace(userId))
-            //    throw new CommonException("用户未登录");
-            try
+            if (string.IsNullOrWhiteSpace(userId))
             {
-                var cards = await _db.Queryable<WarrantyRecord>()
-                                      .Where(r => r.UserId == userId && !r.IsDeleted)
-                                      .ToListAsync()
-                                      .ConfigureAwait(false);
-
-                // 内存排序
-                return cards
-                    .OrderBy(r => r.OrderStatus == WarrantyStatusEnum.Active ? 0 : 1)
-                    .ThenByDescending(r => r.CreateTime)
-                    .Select(c => MapToCardResp(c))
-                    .ToList();
-
+                throw new CommonException("用户未登录");
             }
-            catch (Exception ex)
-            {
-                throw new CommonException("获取用户延保卡列表失败");
-            }
+
+            var cards = await _db.Queryable<WarrantyRecord>()
+                                     .Where(r => r.UserId == userId && !r.IsDeleted)
+                                     .ToListAsync()
+                                     .ConfigureAwait(false);
+
+            // 内存排序
+            return cards
+                .OrderBy(r => r.OrderStatus == WarrantyStatusEnum.Active ? 0 : 1)
+                .ThenByDescending(r => r.CreateTime)
+                .Select(c => MapToCardResp(c))
+                .ToList();
+          
 
         }
 

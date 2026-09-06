@@ -97,10 +97,6 @@ namespace OpenAuth.App.Response
         /// 处理备注
         /// </summary>
         public string Remark { get; set; }
-        /// <summary>
-        /// 处理人ID
-        /// </summary>
-        public string HandlerId { get; set; }
 
         /// <summary>
         /// 处理时间

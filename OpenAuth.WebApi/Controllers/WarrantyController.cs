@@ -38,6 +38,7 @@ namespace OpenAuth.WebApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpGet]
+        [ApiExplorerSettings(IgnoreApi = true)]
         [AllowAnonymous]
         public Response<object> TestSign()
         {
@@ -60,6 +61,7 @@ namespace OpenAuth.WebApi.Controllers
         }
         //测试签名工具类
         [HttpGet]
+        [ApiExplorerSettings(IgnoreApi = true)]
         [AllowAnonymous]
         public IActionResult TestSignWithSigner()
         {
@@ -101,7 +103,16 @@ namespace OpenAuth.WebApi.Controllers
             }
         }
 
-
+        /// <summary>
+        /// 后台管理 - 查询延保卡列表
+        /// </summary>
+        /// <param name="req">查询条件</param>
+        /// <returns>分页延保卡数据</returns>
+        [HttpPost]
+        public async Task<TableResp<WarrantyCardResp>> QueryWarrantyCards([FromBody] QueryWarrantyCardsReq req)
+        {
+            return await _warrantyApp.QueryWarrantyCardsAsync(req);
+        }
 
         /// <summary>
         /// 创建延保新订单并返回支付参数
@@ -109,6 +120,7 @@ namespace OpenAuth.WebApi.Controllers
         /// <param name="request">请求参数</param>
         /// <returns></returns>
         [HttpPost]
+        [ApiExplorerSettings(IgnoreApi = true)]
         public async Task<Response<WeChatPayResp>> CreatePayOrder([FromBody] CreateWarrantyPayOrderReq request)
         {
             var result = new Response<WeChatPayResp>();
@@ -131,6 +143,7 @@ namespace OpenAuth.WebApi.Controllers
         /// 延保订单审核（通过/拒绝，拒绝时自动退款）
         /// </summary>
         [HttpPost]
+        [ApiExplorerSettings(IgnoreApi = true)]
         public async Task<Response<bool>> AuditWarrantyOrder([FromBody] AuditWarrantyOrderReq request)
         {
             var result = new Response<bool>();
@@ -162,6 +175,7 @@ namespace OpenAuth.WebApi.Controllers
         /// <param name="orderNo">订单号</param>
         /// <returns></returns>
         [HttpGet]
+        [ApiExplorerSettings(IgnoreApi = true)]
         public async Task<Response<WarrantyCardResp>> QueryOrderStatus(string orderNo)
         {
             var result = new Response<WarrantyCardResp>();
@@ -185,7 +199,6 @@ namespace OpenAuth.WebApi.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpGet]
-        [AllowAnonymous]
         public async Task<Response<List<WarrantyCardResp>>> MyCards()
         {
             var result = new Response<List<WarrantyCardResp>>();
@@ -193,7 +206,7 @@ namespace OpenAuth.WebApi.Controllers
             {
                 // 从当前登录上下文获取用户ID
                 //var userId = GetWxUserId();
-                string userId = "test_user_001";
+                var userId=_auth.GetCurrentSession().UserId;
                 var data = await _warrantyApp.GetUserCardsAsync(userId);
                 result.Code = 200;
                 result.Message = "查询成功";
@@ -231,19 +244,6 @@ namespace OpenAuth.WebApi.Controllers
             return result;
         }
 
-        /// <summary>
-        /// 获取当前登录用户的ID
-        /// </summary>
-        /// <returns></returns>
-        /// <exception cref="Exception"></exception>
-        private string GetWxUserId()
-        {
-            var session = _auth.GetCurrentSession();
-            if (session?.UserId == null)
-            {
-                throw new Exception("用户未登录");
-            }
-            return session.UserId;
-        }
+  
     }
 }

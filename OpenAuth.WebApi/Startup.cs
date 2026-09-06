@@ -90,8 +90,16 @@ namespace OpenAuth.WebApi
             //{
                 services.AddSwaggerGen(option =>
                 {
+                    var allowedControllers = new List<string> { "UserProfile" ,"File","Products","RepairOrders","WeChat","Check", "Warranty" };
+
                     foreach (var controller in GetControllers())
                     {
+                        var controllerName = controller.Name.Replace("Controller", "");
+                        if (!allowedControllers.Contains(controllerName))
+                        {
+                            continue;
+                        }
+
                         var groupname = GetSwaggerGroupName(controller);
 
                         option.SwaggerDoc(groupname, new OpenApiInfo
@@ -282,8 +290,20 @@ namespace OpenAuth.WebApi
                         IntrospectionExtensions.GetTypeInfo(GetType()).Assembly
                             .GetManifestResourceStream("OpenAuth.WebApi.index.html");
 
+                    //var allowedController = "UserProfile";
+                    //var allowedController = new List<string> { "UserFile" };
+                    var allowedControllers = new List<string> { "UserProfile", "File", "Products", "RepairOrders", "WeChat", "Check","Warranty" };
+
                     foreach (var controller in GetControllers())
                     {
+
+                        var controllerName = controller.Name.Replace("Controller", "");
+
+
+                        if (!allowedControllers.Contains(controllerName))
+                        {
+                            continue;
+                        }
                         var groupname = GetSwaggerGroupName(controller);
 
                         c.SwaggerEndpoint($"/swagger/{groupname}/swagger.json", groupname);

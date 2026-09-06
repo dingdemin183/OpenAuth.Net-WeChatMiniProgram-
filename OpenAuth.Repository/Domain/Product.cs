@@ -53,5 +53,6 @@ namespace OpenAuth.Repository.Domain
         /// 是否删除：0-未删除，1-已删除
         /// </summary>
         public bool IsDeleted { get; set; } = false;
+
     }
 }

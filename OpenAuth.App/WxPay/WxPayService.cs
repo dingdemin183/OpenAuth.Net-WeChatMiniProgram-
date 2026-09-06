@@ -222,8 +222,8 @@ namespace OpenAuth.App.WxPay
                     IsMatch = expectedSignature == actualSignature,
                     Authorization = authorization,
                     Note = expectedSignature == actualSignature
-                        ? "✅ 签名生成正确！"
-                        : "❌ 签名不匹配，请检查签名串格式"
+                        ? " 签名生成正确！"
+                        : " 签名不匹配，请检查签名串格式"
                 };
             }
             catch (Exception ex)

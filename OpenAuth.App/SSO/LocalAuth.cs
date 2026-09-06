@@ -165,18 +165,40 @@ namespace OpenAuth.App.SSO
         /// </summary>
         public UserAuthSession GetCurrentSession()
         {
+            Console.WriteLine($"[GetCurrentSession] 被调用，时间: {DateTime.Now}");
             try
             {
                 var token = GetToken();
-                if (string.IsNullOrEmpty(token)) return null;
+                Console.WriteLine($"[GetCurrentSession] Token: {token?.Substring(0, Math.Min(20, token?.Length ?? 0))}...");
+
+                if (string.IsNullOrEmpty(token))
+                {
+                    Console.WriteLine("[GetCurrentSession] Token为空");
+                    return null;
+                }
 
                 var sessionId = GetSessionIdFromToken(token);
-                if (string.IsNullOrEmpty(sessionId)) return null;
+                Console.WriteLine($"[GetCurrentSession] SessionId: {sessionId}");
 
-                return _cacheContext.Get<UserAuthSession>(sessionId);
+                if (string.IsNullOrEmpty(sessionId))
+                {
+                    Console.WriteLine("[GetCurrentSession] SessionId为空");
+                    return null;
+                }
+
+                var session = _cacheContext.Get<UserAuthSession>(sessionId);
+                Console.WriteLine($"[GetCurrentSession] Session存在: {session != null}");
+
+                if (session != null)
+                {
+                    Console.WriteLine($"[GetCurrentSession] Session Account: {session.Account}, CreateTime: {session.CreateTime}");
+                }
+
+                return session;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine($"[GetCurrentSession] 异常: {ex.Message}");
                 return null;
             }
         }
@@ -249,7 +271,7 @@ namespace OpenAuth.App.SSO
             }
             catch (Exception ex)
             {
-                throw ex;
+                return false;
             }
         }
 
@@ -267,12 +289,10 @@ namespace OpenAuth.App.SSO
             }
             AuthStrategyContext context = null;
             var token = GetToken();
-            
-            // 从JWT Token中直接提取用户账号
+
             var account = JwtTokenHelper.GetAccount(token);
             if (!string.IsNullOrEmpty(account))
             {
-                // 验证会话是否有效（未被登出）
                 var sessionId = GetSessionIdFromToken(token);
                 if (!string.IsNullOrEmpty(sessionId))
                 {
@@ -285,6 +305,29 @@ namespace OpenAuth.App.SSO
             }
             return context;
         }
+        //public AuthStrategyContext GetCurrentUser()
+        //{
+        //    if (_appConfiguration.Value.IsIdentityAuth)
+        //    {
+        //        return _app.GetAuthStrategyContext(GetToken());
+        //    }
+
+        //    var token = GetToken();
+        //    if (string.IsNullOrEmpty(token)) return null;
+
+        //    var account = JwtTokenHelper.GetAccount(token);
+        //    if (string.IsNullOrEmpty(account)) return null;
+
+        //    var sessionId = GetSessionIdFromToken(token);
+        //    if (string.IsNullOrEmpty(sessionId)) return null;
+
+        //    var session = _cacheContext.Get<UserAuthSession>(sessionId);
+        //    if (session == null) return null;
+
+        //    // 如果只需要 session 信息，可以返回一个轻量级上下文，而不触发 NormalAuthStrategy
+        //    // 但如果你确实需要完整的授权上下文，那只能确保 NormalAuthStrategy 能正常工作
+        //    return _app.GetAuthStrategyContext(account);
+        //}
 
         /// <summary>
         /// 获取当前登录的用户名

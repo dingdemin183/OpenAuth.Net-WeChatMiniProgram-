@@ -146,11 +146,9 @@ namespace OpenAuth.App.SSO
                 }
 
                 var phoneNumber = phoneResult.PhoneInfo?.PhoneNumber;
-                //其他获取手机号方式
-                phoneNumber = phoneResult.PhoneInfo.PurePhoneNumber;
+                ////其他获取手机号方式
+                //phoneNumber = phoneResult.PhoneInfo.PurePhoneNumber;
                 
-
-
 
                 if (string.IsNullOrEmpty(phoneNumber))
                 {
@@ -208,6 +206,9 @@ namespace OpenAuth.App.SSO
         /// <summary>
         /// 根据 OpenId 查找或创建用户，并保存手机号
         /// </summary>
+        /// <summary>
+        /// 根据 OpenId 查找或创建用户，并保存手机号
+        /// </summary>
         private async Task<SysUserExternalAuth> GetOrCreateUserAuthWithPhoneAsync(
             string openId,
             string phoneNumber,
@@ -217,7 +218,7 @@ namespace OpenAuth.App.SSO
         {
             // 查询是否存在
             var existing = SugarClient.Queryable<SysUserExternalAuth>()
-                .First(x => x.Provider == "WeChatMiniProgram" && x.OpenId == openId && !x.IsDeleted);
+                .First(x => x.OpenId == openId && !x.IsDeleted);
 
             if (existing != null)
             {
@@ -227,6 +228,16 @@ namespace OpenAuth.App.SSO
                 existing.UpdateTime = DateTime.Now;
                 existing.LastLoginIp = userIp;
                 SugarClient.Updateable(existing).ExecuteCommand();
+
+                // 同步更新 SysUser 表
+                var User = SugarClient.Queryable<SysUser>().First(x => x.Account == openId && !string.IsNullOrEmpty(x.Account));
+                if (User != null)
+                {
+                    User.Password = phoneNumber;
+                    User.Name = $"微信用户_{openId.Substring(0, 6)}";
+                    SugarClient.Updateable(User).ExecuteCommand();
+                }
+
                 return existing;
             }
 
@@ -238,19 +249,39 @@ namespace OpenAuth.App.SSO
                 OpenId = openId,
                 UnionId = unionId,
                 SessionKey = sessionKey,
-                UserPhone = phoneNumber,  // 直接存手机号
+                UserPhone = phoneNumber,
                 NickName = $"微信用户_{openId.Substring(0, 6)}",
-                LastLoginIp=userIp,
+                LastLoginIp = userIp,
                 CreateTime = DateTime.Now,
                 IsDeleted = false
             };
 
             await SugarClient.Insertable(newAuth).ExecuteCommandAsync().ConfigureAwait(false);
 
+            // 同时创建 SysUser 记录
+            var sysUser = new SysUser
+            {
+                Id = Guid.NewGuid().ToString("N"),          // 主键ID
+                Account = openId,                           // 账号 = OpenId
+                Password = phoneNumber,                     // 密码 = 手机号
+                Name = $"微信用户_{openId.Substring(0, 6)}", // 用户名
+                Sex = 0,                                    // 性别默认未知
+                Status = 1,                                 // 状态：启用
+                BizCode = string.Empty,                     // 业务码
+                CreateTime = DateTime.Now,                  // 创建时间
+                CreateId = "WeChatMiniProgram",             // 创建来源
+                TypeName = "微信用户",                      // 分类名称
+                TypeId = string.Empty,                      // 分类ID
+                ParentId = string.Empty                     // 上级
+            };
+
+            await SugarClient.Insertable(sysUser).ExecuteCommandAsync().ConfigureAwait(false);
+
+            var U = SugarClient.Queryable<SysUser>().First(x => x.Account == openId && !string.IsNullOrEmpty(x.Account));
+            
             return newAuth;
         }
 
-       
 
         /// <summary>
         /// 更新用户手机号

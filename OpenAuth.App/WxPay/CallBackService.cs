@@ -58,7 +58,7 @@ namespace OpenAuth.App.WxPay
                 // 构建验签串
                 var signStr = $"{wechatpayTimestamp}\n{wechatpayNonce}\n{requestBody}\n";
 
-                // 获取微信支付平台证书
+                // 获取微信支付平台证书（微信支付公钥）
                 var certificate = GetPlatformCertificate(wechatpaySerial);
 
                 // 使用证书公钥验签

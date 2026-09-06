@@ -1,35 +1,28 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿// OpenAuth.App/Response/UserProfileResp.cs
 
 namespace OpenAuth.App.Response
 {
-    /// <summary>
-    /// 用户个人资料响应
-    /// </summary>
     public class UserProfileResp
     {
-        /// <summary>
-        /// 用户id
-        /// </summary>
         public string Id { get; set; }
-        /// <summary>
-        /// openid
-        /// </summary>
         public string OpenId { get; set; }
-        /// <summary>
-        /// 昵称
-        /// </summary>
         public string NickName { get; set; }
-        /// <summary>
-        /// 头像
-        /// </summary>
         public string AvatarUrl { get; set; }
-        /// <summary>
-        /// 手机号
-        /// </summary>
         public string UserPhone { get; set; }
+
+        /// <summary>
+        /// 待审核头像URL
+        /// </summary>
+        public string PendingAvatarUrl { get; set; }
+
+        /// <summary>
+        /// 头像审核状态：pending-审核中, pass-通过, reject-拒绝
+        /// </summary>
+        public string AvatarAuditStatus { get; set; }
+
+        /// <summary>
+        /// 提示消息（用于前端展示）
+        /// </summary>
+        public string Message { get; set; }
     }
 }

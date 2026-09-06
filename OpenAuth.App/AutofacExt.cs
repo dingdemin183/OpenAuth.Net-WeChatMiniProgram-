@@ -15,12 +15,14 @@
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using Autofac.Extras.Quartz;
+using Infrastructure;
 using Infrastructure.Cache;
 using Infrastructure.Extensions.AutofacManager;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyModel;
+using Microsoft.Extensions.Options;
 using OpenAuth.App.Interface;
 using OpenAuth.App.SSO;
 using OpenAuth.App.WxPay;
@@ -35,13 +37,14 @@ using IContainer = Autofac.IContainer;
 
 namespace OpenAuth.App
 {
-    public static  class AutofacExt
+    public static class AutofacExt
     {
         private static IContainer _container;
+
         public static IContainer InitForTest(IServiceCollection services)
         {
             var builder = new ContainerBuilder();
-           
+
             //注册数据库基础操作和工作单元
             services.AddScoped(typeof(IRepository<,>), typeof(BaseRepository<,>));
             services.AddScoped(typeof(IUnitWork<>), typeof(UnitWork<>));
@@ -62,30 +65,11 @@ namespace OpenAuth.App
             {
                 services.AddScoped(typeof(IHttpContextAccessor), typeof(HttpContextAccessor));
             }
-            
+
             InitDependency(builder);
 
-            builder.Register(componentContext =>
-            {
-                // 解析 IConfiguration 获取配置
-                var configuration = componentContext.Resolve<IConfiguration>();
-                var appSetting = configuration.GetSection("AppSetting");
-
-                // 从配置中读取微信支付相关参数
-                var privateKeyPath = appSetting["WeChatPay:PrivateKeyPath"];
-                var certSerial = appSetting["WeChatPay:CertSerial"];
-                var apiV3Key = appSetting["WeChatPay:ApiV3Key"];
-
-                // 如果配置缺失，给出明确的错误提示（可以选配）
-                if (string.IsNullOrEmpty(privateKeyPath))
-                {
-                    throw new InvalidOperationException("微信支付配置缺失: AppSetting:WeChatPay:PrivateKeyPath 未设置");
-                }
-
-                return new WeChatPayV3Signer(privateKeyPath, certSerial, apiV3Key);
-            })
-            .AsSelf()
-            .InstancePerLifetimeScope();
+            // 注册 WeChatPayV3Signer
+            RegisterWeChatPaySigner(builder);
 
             builder.RegisterModule(new QuartzAutofacFactoryModule());
 
@@ -93,9 +77,7 @@ namespace OpenAuth.App
 
             _container = builder.Build();
             return _container;
-
         }
-
 
         public static void InitAutofac(ContainerBuilder builder)
         {
@@ -114,27 +96,57 @@ namespace OpenAuth.App
 
             InitDependency(builder);
 
-            // 手动注册 WeChatPayV3Signer，从配置文件读取参数
+            // 注册 WeChatPayV3Signer
+            RegisterWeChatPaySigner(builder);
+
+            builder.RegisterModule(new QuartzAutofacFactoryModule());
+        }
+
+        /// <summary>
+        /// 注册微信支付签名器
+        /// </summary>
+        private static void RegisterWeChatPaySigner(ContainerBuilder builder)
+        {
             builder.Register(componentContext =>
             {
-                var configuration = componentContext.Resolve<IConfiguration>();
-                var appSetting = configuration.GetSection("AppSetting");
+                var appSettingOptions = componentContext.Resolve<IOptions<AppSetting>>();
+                var config = appSettingOptions.Value.WeChatPay;
 
-                var privateKeyPath = appSetting["WeChatPay:PrivateKeyPath"];
-                var certSerial = appSetting["WeChatPay:CertSerial"];
-                var apiV3Key = appSetting["WeChatPay:ApiV3Key"];
-
-                if (string.IsNullOrEmpty(privateKeyPath))
+                if (config == null)
                 {
-                    throw new InvalidOperationException("微信支付配置缺失: AppSetting:WeChatPay:PrivateKeyPath 未设置");
+                    throw new InvalidOperationException(
+                        "WeChatPay 配置未加载，请检查 appsettings.json 中 AppSetting:WeChatPay 节点是否存在"
+                    );
                 }
 
-                return new WeChatPayV3Signer(privateKeyPath, certSerial, apiV3Key);
+                // 检查必要配置
+                if (string.IsNullOrEmpty(config.PrivateKeyPath))
+                {
+                    throw new InvalidOperationException(
+                        "微信支付配置缺失: PrivateKeyPath 未设置，请检查 appsettings.json 中 AppSetting:WeChatPay:PrivateKeyPath"
+                    );
+                }
+                if (string.IsNullOrEmpty(config.MchId))
+                {
+                    throw new InvalidOperationException(
+                        "微信支付配置缺失: MchId 未设置，请检查 appsettings.json 中 AppSetting:WeChatPay:MchId"
+                    );
+                }
+                if (string.IsNullOrEmpty(config.SerialNo))
+                {
+                    throw new InvalidOperationException(
+                        "微信支付配置缺失: SerialNo 未设置，请检查 appsettings.json 中 AppSetting:WeChatPay:SerialNo"
+                    );
+                }
+
+                return new WeChatPayV3Signer(
+                    config.PrivateKeyPath,  // 参数1: 私钥路径
+                    config.MchId,           // 参数2: 商户号
+                    config.SerialNo         // 参数3: 证书序列号
+                );
             })
             .AsSelf()
             .InstancePerLifetimeScope();
-
-            builder.RegisterModule(new QuartzAutofacFactoryModule());
         }
 
         /// <summary>
@@ -163,7 +175,7 @@ namespace OpenAuth.App
                     Console.WriteLine(_compilation.Name + ex.Message);
                 }
             }
-            
+
             builder.RegisterAssemblyTypes(assemblyList.ToArray())
                 .Where(type => baseType.IsAssignableFrom(type) && !type.IsAbstract)
                 .AsSelf().AsImplementedInterfaces()

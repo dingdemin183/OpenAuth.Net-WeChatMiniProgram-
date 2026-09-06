@@ -7,11 +7,11 @@ using OpenAuth.App.Repair;
 using OpenAuth.App.Request;
 using OpenAuth.App.Response;
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace OpenAuth.WebApi.Controllers
 {
-
 
     /// <summary>
     /// 报修单管理
@@ -54,25 +54,8 @@ namespace OpenAuth.WebApi.Controllers
         [HttpPost]
         public async Task<TableResp<RepairOrderResp>> Query([FromBody] QueryRepairOrderListReq request)
         {
-            try
-            {
-                return await _repairOrderApp.QueryAsync(request);
-            }
-            catch (Exception ex)
-            {
-                return new TableResp<RepairOrderResp>
-                {
-                    Code = 500,
-                    Message = ex.Message,
-                    Data = null,
-                    Count = 0,
-                    Page = request?.page ?? 1,
-                    Limit = request?.limit ?? 20
-                };
-            }
+            return await _repairOrderApp.QueryAsync(request);
         }
-
-
 
         /// <summary>
         ///管理员审核处理报修-后台管理（同意=1、拒绝=0）
@@ -82,39 +65,17 @@ namespace OpenAuth.WebApi.Controllers
         [HttpPost]
         public async Task<Response<bool>> UpdateStatus([FromBody] UpdateRepairStatusReq request)
         {
-            try
+            // 从当前登录上下文获取处理人ID
+            var handlerId = GetCurrentUserId();
+
+            await _repairOrderApp.UpdateStatusAsync(request, handlerId);
+
+            return new Response<bool>
             {
-                if (request == null)
-                {
-                    return new Response<bool>
-                    {
-                        Code = 400,
-                        Message = "请求参数不能为空",
-                        Data = false
-                    };
-                }
-
-                // 从当前登录上下文获取处理人ID
-                var handlerId = GetCurrentUserId();
-
-                await _repairOrderApp.UpdateStatusAsync(request, handlerId);
-
-                return new Response<bool>
-                {
-                    Code = 200,
-                    Message = "更新成功",
-                    Data = true
-                };
-            }
-            catch (Exception ex)
-            {
-                return new Response<bool>
-                {
-                    Code = 500,
-                    Message = ex.Message,
-                    Data = false
-                };
-            }
+                Code = 200,
+                Message = "更新成功",
+                Data = true
+            };
         }
 
         #endregion 后台管理
@@ -128,46 +89,14 @@ namespace OpenAuth.WebApi.Controllers
         [HttpGet]
         public async Task<Response<RepairOrderResp>> GetDetail(string id)
         {
-            try
+            var data = await _repairOrderApp.GetDetailAsync(id);
+
+            return new Response<RepairOrderResp>
             {
-                if (string.IsNullOrWhiteSpace(id))
-                {
-                    return new Response<RepairOrderResp>
-                    {
-                        Code = 400,
-                        Message = "报修单ID不能为空",
-                        Data = null
-                    };
-                }
-
-                var data = await _repairOrderApp.GetDetailAsync(id);
-
-                if (data == null)
-                {
-                    return new Response<RepairOrderResp>
-                    {
-                        Code = 404,
-                        Message = "报修单不存在",
-                        Data = null
-                    };
-                }
-
-                return new Response<RepairOrderResp>
-                {
-                    Code = 200,
-                    Message = "操作成功",
-                    Data = data
-                };
-            }
-            catch (Exception ex)
-            {
-                return new Response<RepairOrderResp>
-                {
-                    Code = 500,
-                    Message = $"获取报修单信息错误：{ex.Message}",
-                    Data = null
-                };
-            }
+                Code = 200,
+                Message = "操作成功",
+                Data = data
+            };
         }
 
         /// <summary>
@@ -177,28 +106,15 @@ namespace OpenAuth.WebApi.Controllers
         [AllowAnonymous]
         public async Task<Response<int>> GetCount()
         {
-            try
+            var count = await _repairOrderApp.GetRepairOrderCountAsync();
+            return new Response<int>
             {
-                var count = await _repairOrderApp.GetRepairOrderCountAsync();
-                return new Response<int>
-                {
-                    Code = 200,
-                    Message = "查询成功",
-                    Data = count
-                };
-            }
-            catch (Exception ex)
-            {
-                return new Response<int>
-                {
-                    Code = 500,
-                    Message = ex.Message,
-                    Data = 0
-                };
-            }
-
-
+                Code = 200,
+                Message = "查询成功",
+                Data = count
+            };
         }
+
         /// <summary>
         /// 用户提交报修-小程序端
         /// </summary>
@@ -207,92 +123,57 @@ namespace OpenAuth.WebApi.Controllers
         [HttpPost]
         public async Task<Response<string>> SubmitRepair([FromBody] AddRepairOrderReq request)
         {
-            try
-            {
+            var id = await _repairOrderApp.SubmitAsync(request);
 
-                var id = await _repairOrderApp.SubmitAsync(request);
-
-                return new Response<string>
-                {
-                    Code = 200,
-                    Message = "提交成功",
-                    Data = id
-                };
-            }
-            catch (Exception ex)
+            return new Response<string>
             {
-                return new Response<string>
-                {
-                    Code = 500,
-                    Message = ex.Message,
-                    Data = null
-                };
-            }
+                Code = 200,
+                Message = "提交成功",
+                Data = id
+            };
         }
 
-        /// <summary>
-        /// 小程序用户更新报修 -小程序端
-        /// </summary>
-        /// <param name="request">请求参数</param>
-        /// <returns></returns>
-        [HttpPost]
-        public async Task<Response<string>> UpdateRepair([FromBody] UpdateRepairOrderReq request)
-        {
-            try
-            {
+        ///// <summary>
+        ///// 小程序用户更新报修 -小程序端
+        ///// </summary>
+        ///// <param name="request">请求参数</param>
+        ///// <returns></returns>
+        //[HttpPost]
+        //public async Task<Response<string>> UpdateRepair([FromBody] UpdateRepairOrderReq request)
+        //{
+        //    var id = await _repairOrderApp.UpdateAsync(request);
 
-                var id = await _repairOrderApp.UpdateAsync(request);
-
-                return new Response<string>
-                {
-                    Code = 200,
-                    Message = "提交成功",
-                    Data = id
-                };
-            }
-            catch (Exception ex)
-            {
-                return new Response<string>
-                {
-                    Code = 500,
-                    Message = ex.Message,
-                    Data = null
-                };
-            }
-        }
-
+        //    return new Response<string>
+        //    {
+        //        Code = 200,
+        //        Message = "提交成功",
+        //        Data = id
+        //    };
+        //}
 
         /// <summary>
         /// 获取当前用户的报修记录（小程序端"我的报修"）
         /// </summary>
         /// <param name="request">请求参数</param>
         /// <returns></returns>
-        [HttpPost]
-        public async Task<TableResp<RepairOrderResp>> MyRepairs([FromBody] QueryRepairOrderListReq request)
+        [HttpGet]
+        public async Task<Response<List<RepairOrderResp>>> MyRepairs()
         {
-            try
+            // 查询当前用户的报修记录
+            var list=await _repairOrderApp.QueryByUserAsync();
+            return new Response<List<RepairOrderResp>>
             {
-                // 查询当前用户的报修记录
-                return await _repairOrderApp.QueryByUserAsync(request);
-            }
-            catch (Exception ex)
-            {
-                return new TableResp<RepairOrderResp>
-                {
-                    Code = 500,
-                    Message = ex.Message,
-                    Data = null,
-                    Count = 0,
-                    Page = request?.page ?? 1,
-                    Limit = request?.limit ?? 20
-                };
-            }
+                Data = list,
+                Message = "查询成功",
+                Code = 200,
+
+
+            };
+
+
+
         }
 
         #endregion
-
-
-
-
     }
 }

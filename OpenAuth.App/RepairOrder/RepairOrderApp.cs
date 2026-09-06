@@ -7,6 +7,7 @@ using OpenAuth.App.SSO;
 using OpenAuth.Repository.Domain;
 using SqlSugar;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -103,7 +104,6 @@ namespace OpenAuth.App.Repair
                 Status = x.Status,
                 StatusText = GetStatusText(x.Status),
                 Remark = x.Remark,
-                HandlerId = x.HandlerId,
                 HandledTime = x.HandledTime,
                 CreateTime = x.CreateTime,
                 UpdateTime = x.UpdateTime
@@ -155,7 +155,6 @@ namespace OpenAuth.App.Repair
                 Status = entity.Status,
                 StatusText = GetStatusText(entity.Status),
                 Remark = entity.Remark,
-                HandlerId = entity.HandlerId,
                 HandledTime = entity.HandledTime,
                 CreateTime = entity.CreateTime,
                 UpdateTime = entity.UpdateTime
@@ -163,21 +162,23 @@ namespace OpenAuth.App.Repair
         }
 
         /// <summary>
-        /// 获取报修单总数
+        /// 获取报修人总数
         /// </summary>
         /// <returns>报修单总数量</returns>
         /// <CommonException cref="CommonException"></CommonException>
         public async Task<int> GetRepairOrderCountAsync()
         {
             var count = await _db.Queryable<RepairOrder>()
-                   .Where(t => t.IsDeleted == false)
-                   .CountAsync()
-                   .ConfigureAwait(false);
+                .Where(t => !t.IsDeleted)
+                .GroupBy(t => t.UserId)
+                .Select(t => t.UserId)
+                .CountAsync()
+                .ConfigureAwait(false);
 
             return count;
         }
 
-       
+
 
 
         /// <summary>
@@ -312,7 +313,7 @@ namespace OpenAuth.App.Repair
             var entity = new RepairOrder
             {
                 Id = Guid.NewGuid().ToString("N"),
-                UserId = "1",
+                UserId = session.UserId,
                 UserName = request.UserName,
                 Phone = request.Phone,
                 ProductBrand = request.ProductBrand,
@@ -347,7 +348,7 @@ namespace OpenAuth.App.Repair
         /// </summary>
         /// <param name="request">查询参数</param>
         /// <returns></returns>
-        public async Task<TableResp<RepairOrderResp>> QueryByUserAsync(QueryRepairOrderListReq request)
+        public async Task<List<RepairOrderResp>> QueryByUserAsync()
         {
             var session = _auth.GetCurrentSession();
             var userId = session.UserId;
@@ -355,77 +356,40 @@ namespace OpenAuth.App.Repair
             {
                 throw new CommonException("当前用户未登录，请重新登录");
             }
-            var query = _db.Queryable<RepairOrder>()
-                .Where(x => !x.IsDeleted && x.UserId == userId);
 
-            // 状态筛选
-            if (request.Status.HasValue)
-            {
-                query = query.Where(x => x.Status == request.Status.Value);
-            }
-
-            // 时间范围筛选
-            if (request.StartTime.HasValue)
-            {
-                query = query.Where(x => x.CreateTime >= request.StartTime.Value);
-            }
-            if (request.EndTime.HasValue)
-            {
-                var endTime = request.EndTime.Value.Date.AddDays(1);
-                query = query.Where(x => x.CreateTime < endTime);
-            }
-
-            // 关键词搜索（故障描述或产品型号）
-            if (!string.IsNullOrEmpty(request.key))
-            {
-                query = query.Where(x => x.FaultDesc.Contains(request.key)
-                                          || x.ProductModel.Contains(request.key)
-                                          || x.ProductBrand.Contains(request.key)
-                                          || x.ProductType.Contains(request.key));
-            }
-
-            var total = await query.CountAsync();
-
-            var list = await query
+            // 查询用户的所有报修单（按创建时间倒序）
+            var repairOrders = await _db.Queryable<RepairOrder>()
+                .Where(x => !x.IsDeleted && x.UserId == userId)
                 .OrderByDescending(x => x.CreateTime)
-                .Skip((request.page - 1) * request.limit)
-                .Take(request.limit)
-                .ToListAsync();
+                .ToListAsync()
+                .ConfigureAwait(false);
 
-            var respList = list.Select(x => new RepairOrderResp
+            // 映射到响应DTO列表
+            return repairOrders.Select(order => new RepairOrderResp
             {
-                Id = x.Id,
-                UserId = x.UserId,
-                UserName = x.UserName,
-                Phone = x.Phone,
-                ProductBrand = x.ProductBrand,
-                ProductType = x.ProductType,
-                ProductModel = x.ProductModel,
-                FaultDesc = x.FaultDesc,
-                PurchaseDate = x.PurchaseDate,
-                EnergyImage = x.EnergyImage,
-                ProductImage = x.ProductImage,
-                TradeImage = x.TradeImage,
-                Province = x.Province,
-                City = x.City,
-                Area = x.Area,
-                DetailAddress = x.DetailAddress,
-                Status = x.Status,
-                StatusText = GetStatusText(x.Status),
-                Remark = x.Remark,
-                HandlerId = x.HandlerId,
-                HandledTime = x.HandledTime,
-                CreateTime = x.CreateTime,
-                UpdateTime = x.UpdateTime
+                Id = order.Id,
+                UserId = order.UserId,
+                UserName = order.UserName,
+                Phone = order.Phone,
+                ProductBrand = order.ProductBrand,
+                ProductType = order.ProductType,
+                ProductModel = order.ProductModel,
+                FaultDesc = order.FaultDesc,
+                PurchaseDate = order.PurchaseDate,
+                EnergyImage = order.EnergyImage,
+                ProductImage = order.ProductImage,
+                TradeImage = order.TradeImage,
+                Province = order.Province,
+                City = order.City,
+                Area = order.Area,
+                DetailAddress = order.DetailAddress,
+                Status = order.Status,
+                StatusText = GetStatusText(order.Status),
+                Remark = order.Remark,
+                HandledTime = order.HandledTime,
+                CreateTime = order.CreateTime,
+                UpdateTime = order.UpdateTime
             }).ToList();
-
-            return new TableResp<RepairOrderResp>
-            {
-                Data = respList,
-                Count = total,
-                Page = request.page,
-                Limit = request.limit
-            };
         }
 
         /// <summary>

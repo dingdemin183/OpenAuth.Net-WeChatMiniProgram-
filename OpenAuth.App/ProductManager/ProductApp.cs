@@ -5,6 +5,7 @@ using Infrastructure;
 using OpenAuth.App.Interface;
 using OpenAuth.App.Request;
 using OpenAuth.App.Response;
+using OpenAuth.App.WxPay;
 using OpenAuth.Repository.Domain;
 using OpenAuth.Repository.Interface;
 using SqlSugar;
@@ -18,10 +19,12 @@ namespace OpenAuth.App.ProductManager
     public class ProductApp : SqlSugarBaseApp<Product>
     {
         private readonly ISqlSugarClient _db;
+        private readonly WxSecurityService _securityService;
 
-        public ProductApp(ISqlSugarClient db ,IAuth auth ) : base(db,auth)
+        public ProductApp(ISqlSugarClient db ,IAuth auth,WxSecurityService wxSecurityService ) : base(db,auth)
         {
             _db = db;
+            _securityService = wxSecurityService;
         }
 
         #region 后台商品管理
@@ -34,7 +37,7 @@ namespace OpenAuth.App.ProductManager
         /// <exception cref="Exception"></exception>
         public async Task<string> Add(AddProductReq req)
         {
-            if(req == null)
+            if (req == null)
             {
                 throw new Exception("请求参数不能为空");
             }
@@ -42,19 +45,26 @@ namespace OpenAuth.App.ProductManager
             {
                 throw new Exception("商品名称不能为空");
             }
-            if(string.IsNullOrEmpty(req.ImageUrl))
+            if (string.IsNullOrEmpty(req.ImageUrl))
             {
                 throw new Exception("商品图片不能为空");
             }
-            if(string.IsNullOrEmpty(req.TaobaoLink))
+            if (string.IsNullOrEmpty(req.TaobaoLink))
             {
                 throw new Exception("商品淘宝链接不能为空");
             }
-            if (!Uri.IsWellFormedUriString(req.TaobaoLink, UriKind.Absolute))
-                throw new CommonException("淘宝链接格式不正确");
-            if (req.Price<0)
+            //if (!Uri.IsWellFormedUriString(req.TaobaoLink, UriKind.Absolute))
+            //    throw new CommonException("淘宝链接格式不正确");
+            if (req.Price < 0)
             {
                 throw new Exception("商品价格错误");
+            }
+
+            // 同步检测商品图片（不需要openId，立即返回结果）
+            var isImageSafe = await _securityService.CheckImageSecuritySyncAsync(req.ImageUrl);
+            if (!isImageSafe)
+            {
+                throw new CommonException("商品图片包含违规内容，请更换后重试");
             }
 
             var product = new Product
@@ -68,11 +78,12 @@ namespace OpenAuth.App.ProductManager
                 CreateTime = DateTime.Now,
                 IsDeleted = false
             };
+
             await _db.Insertable(product)
                 .ExecuteCommandAsync()
                 .ConfigureAwait(false);
-            return product.Id;
 
+            return product.Id;
         }
 
         /// <summary>
@@ -114,6 +125,12 @@ namespace OpenAuth.App.ProductManager
             if (product == null)
                 throw new Exception("商品不存在");
 
+
+            var isImageSafe = await _securityService.CheckImageSecuritySyncAsync(req.ImageUrl);
+            if (!isImageSafe)
+            {
+                throw new CommonException("商品图片包含违规内容，请更换后重试");
+            }
             product.Name = req.Name;
             product.Price = req.Price;
             product.ImageUrl = req.ImageUrl;

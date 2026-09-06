@@ -112,11 +112,14 @@ namespace OpenAuth.App
             set
             {
                 _user = value;
-                _userRoleIds = SugarClient.Queryable<Relevance>().Where(u => u.FirstId == _user.Id && u.RelKey == Define.USERROLE)
+                
+                var userId = _user.Id;
+                _userRoleIds = SugarClient.Queryable<Relevance>()
+                    .Where(u => u.FirstId == userId && u.RelKey == Define.USERROLE)
                     .Select(u => u.SecondId).ToList();
             }
         }
-        
+
 
         public List<BuilderTableColumn> GetTableColumns(string moduleCode)
         {

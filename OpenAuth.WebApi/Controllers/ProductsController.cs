@@ -115,8 +115,8 @@ namespace OpenAuth.WebApi.Controllers
         /// </summary>
         /// <param name="req">商品id</param>
         /// <returns></returns>
-        [HttpGet]
-        public async Task<Response<bool>> Delete(DeleteProductReq req)
+        [HttpPost]
+        public async Task<Response<bool>> Delete([FromBody] DeleteProductReq req)
         {
             try
             {

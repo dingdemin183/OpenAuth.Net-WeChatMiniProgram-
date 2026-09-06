@@ -56,6 +56,24 @@ namespace OpenAuth.Repository.Domain
         public string AvatarUrl { get; set; }
 
         /// <summary>
+        /// 待审核头像URL
+        /// </summary>
+        [SugarColumn(ColumnName = "PendingAvatarUrl", ColumnDescription = "待审核头像URL", Length = 500, IsNullable = true)]
+        public string PendingAvatarUrl { get; set; }
+
+        /// <summary>
+        /// 头像审核状态：pending-审核中, pass-通过, reject-拒绝
+        /// </summary>
+        [SugarColumn(ColumnName = "AvatarAuditStatus", ColumnDescription = "头像审核状态", Length = 20, IsNullable = true)]
+        public string AvatarAuditStatus { get; set; }
+
+        /// <summary>
+        /// 微信审核任务ID
+        /// </summary>
+        [SugarColumn(ColumnName = "AvatarTraceId", ColumnDescription = "微信审核任务ID", Length = 100, IsNullable = true)]
+        public string AvatarTraceId { get; set; }
+
+        /// <summary>
         /// 最后登录IP地址
         /// </summary>
         [SugarColumn(ColumnName = "LastLoginIp", ColumnDescription = "最后登录IP地址", Length = 50, IsNullable = true)]
