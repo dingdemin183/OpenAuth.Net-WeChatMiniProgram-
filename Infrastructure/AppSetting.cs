@@ -1,4 +1,6 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
 
 namespace Infrastructure
 {
@@ -134,5 +136,20 @@ namespace Infrastructure
         /// 退款回调通知地址
         /// </summary>
         public string RefundNotifyUrl { get; set; }
+
+        /// <summary>
+        /// 获取商户API私钥内容（从文件中读取） 
+        /// </summary>
+        public string GetPrivateKeyContent()
+        {
+            if (string.IsNullOrEmpty(PrivateKeyPath))
+                throw new InvalidOperationException("私钥路径未配置");
+
+            var fullPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, PrivateKeyPath);
+            if (!File.Exists(fullPath))
+                throw new FileNotFoundException($"私钥文件不存在: {fullPath}");
+
+            return File.ReadAllText(fullPath);
+        }
     }
 }

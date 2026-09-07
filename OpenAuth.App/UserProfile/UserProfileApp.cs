@@ -42,6 +42,139 @@ namespace OpenAuth.App.UserProfile
         /// <param name="request">请求参数</param>
         /// <returns></returns>
         /// <CommonException cref="CommonException"></CommonException>
+        //public async Task<UserProfileResp> UpdateProfileSyncAsync(UpdateUserProfileReq request)
+        //{
+        //    if (request == null)
+        //        throw new CommonException("请求参数不能为空");
+
+        //    // 获取当前登录用户
+        //    var session = _auth.GetCurrentSession();
+
+        //    if (session?.UserId == null)
+        //    {
+        //        throw new CommonException("用户未登录");
+        //    }
+
+        //    var userId = session.UserId;
+
+        //    // 查询用户第三方认证信息
+        //    var userAuth = await _db.Queryable<SysUserExternalAuth>()
+        //        .FirstAsync(x => x.Id == userId && !x.IsDeleted)
+        //        .ConfigureAwait(false);
+
+        //    if (userAuth == null)
+        //    {
+        //        throw new CommonException("用户不存在");
+        //    }
+
+        //    //var hasNickNameUpdate = false;
+        //    //var hasAvatarUpdate = false;
+
+        //    //// 检测昵称（同步检测）
+        //    //if (!string.IsNullOrEmpty(request.NickName))
+        //    //{
+        //    //    // userAuth.OpenId = "oH5Zc3TxmUx8_IlHtAOTT3JLVlwg";  //写一个正确的openid做测试
+        //    //    var isTextSafe = await _wxSecurityService.CheckTextSecurityAsync(userAuth.OpenId, request.NickName);
+        //    //    if (!isTextSafe)
+        //    //    {
+        //    //        throw new CommonException("昵称包含违规内容，请修改");
+        //    //    }
+
+        //    //    userAuth.NickName = request.NickName;
+        //    //    hasNickNameUpdate = true;
+        //    //}
+
+        //    //// 同步检测头像
+        //    //if (!string.IsNullOrEmpty(request.AvatarUrl))
+        //    //{
+        //    //    try
+        //    //    {
+        //    //        // 同步检测图片是否安全
+        //    //        var isImageSafe = await _wxSecurityService.CheckImageSecuritySyncAsync(request.AvatarUrl);
+
+        //    //        if (!isImageSafe)
+        //    //        {
+        //    //            throw new CommonException("头像包含违规内容，请更换");
+        //    //        }
+
+        //    //        // 检测通过，直接更新头像
+        //    //        userAuth.AvatarUrl = request.AvatarUrl;
+        //    //        // 如果有待审核的头像，清理掉
+        //    //        userAuth.PendingAvatarUrl = null;
+        //    //        userAuth.AvatarAuditStatus = "pass";
+        //    //        userAuth.AvatarTraceId = null;
+        //    //        hasAvatarUpdate = true;
+        //    //    }
+        //    //    catch (Exception ex) when (ex is CommonException)
+        //    //    {
+        //    //        throw; // 重新抛出业务异常
+        //    //    }
+        //    //    catch (Exception ex)
+        //    //    {
+                    
+        //    //        throw new CommonException("头像检测服务异常，请稍后重试");
+        //    //    }
+        //    //}
+
+        //    // 一次性保存所有更新
+        //    if (hasNickNameUpdate || hasAvatarUpdate)
+        //    {
+        //        userAuth.UpdateTime = DateTime.Now;
+
+        //        // 构建需要更新的字段列表
+        //        var updateColumns = new List<string> { "UpdateTime" };
+
+        //        if (hasNickNameUpdate)
+        //        {
+        //            updateColumns.Add("NickName");
+        //        }
+
+        //        if (hasAvatarUpdate)
+        //        {
+        //            updateColumns.Add("AvatarUrl");
+        //            updateColumns.Add("PendingAvatarUrl");
+        //            updateColumns.Add("AvatarAuditStatus");
+        //            updateColumns.Add("AvatarTraceId");
+        //        }
+
+        //        await _db.Updateable(userAuth)
+        //            .UpdateColumns(updateColumns.ToArray())
+        //            .ExecuteCommandAsync()
+        //            .ConfigureAwait(false);
+        //    }
+
+        //    // 构建返回结果
+        //    var resp = new UserProfileResp
+        //    {
+        //        Id = userAuth.Id,
+        //        OpenId = userAuth.OpenId,
+        //        NickName = userAuth.NickName,
+        //        AvatarUrl = userAuth.AvatarUrl,
+        //        UserPhone = userAuth.UserPhone,
+        //        PendingAvatarUrl = userAuth.PendingAvatarUrl,
+        //        AvatarAuditStatus = userAuth.AvatarAuditStatus
+        //    };
+
+        //    // 根据更新情况返回不同的消息
+        //    if (hasAvatarUpdate && hasNickNameUpdate)
+        //    {
+        //        resp.Message = "昵称和头像更新成功";
+        //    }
+        //    else if (hasAvatarUpdate)
+        //    {
+        //        resp.Message = "头像更新成功";
+        //    }
+        //    else if (hasNickNameUpdate)
+        //    {
+        //        resp.Message = "昵称更新成功";
+        //    }
+        //    else
+        //    {
+        //        resp.Message = "没有需要更新的内容";
+        //    }
+
+        //    return resp;
+        //}
         public async Task<UserProfileResp> UpdateProfileSyncAsync(UpdateUserProfileReq request)
         {
             if (request == null)
@@ -70,50 +203,18 @@ namespace OpenAuth.App.UserProfile
             var hasNickNameUpdate = false;
             var hasAvatarUpdate = false;
 
-            // 检测昵称（同步检测）
+            // 更新昵称
             if (!string.IsNullOrEmpty(request.NickName))
             {
-                // userAuth.OpenId = "oH5Zc3TxmUx8_IlHtAOTT3JLVlwg";  //写一个正确的openid做测试
-                var isTextSafe = await _wxSecurityService.CheckTextSecurityAsync(userAuth.OpenId, request.NickName);
-                if (!isTextSafe)
-                {
-                    throw new CommonException("昵称包含违规内容，请修改");
-                }
-
                 userAuth.NickName = request.NickName;
                 hasNickNameUpdate = true;
             }
 
-            // 同步检测头像
+            // 更新头像
             if (!string.IsNullOrEmpty(request.AvatarUrl))
             {
-                try
-                {
-                    // 同步检测图片是否安全
-                    var isImageSafe = await _wxSecurityService.CheckImageSecuritySyncAsync(request.AvatarUrl);
-
-                    if (!isImageSafe)
-                    {
-                        throw new CommonException("头像包含违规内容，请更换");
-                    }
-
-                    // 检测通过，直接更新头像
-                    userAuth.AvatarUrl = request.AvatarUrl;
-                    // 如果有待审核的头像，清理掉
-                    userAuth.PendingAvatarUrl = null;
-                    userAuth.AvatarAuditStatus = "pass";
-                    userAuth.AvatarTraceId = null;
-                    hasAvatarUpdate = true;
-                }
-                catch (Exception ex) when (ex is CommonException)
-                {
-                    throw; // 重新抛出业务异常
-                }
-                catch (Exception ex)
-                {
-                    
-                    throw new CommonException("头像检测服务异常，请稍后重试");
-                }
+                userAuth.AvatarUrl = request.AvatarUrl;
+                hasAvatarUpdate = true;
             }
 
             // 一次性保存所有更新
@@ -132,9 +233,6 @@ namespace OpenAuth.App.UserProfile
                 if (hasAvatarUpdate)
                 {
                     updateColumns.Add("AvatarUrl");
-                    updateColumns.Add("PendingAvatarUrl");
-                    updateColumns.Add("AvatarAuditStatus");
-                    updateColumns.Add("AvatarTraceId");
                 }
 
                 await _db.Updateable(userAuth)
@@ -175,7 +273,6 @@ namespace OpenAuth.App.UserProfile
 
             return resp;
         }
-
 
 
         /// <summary>

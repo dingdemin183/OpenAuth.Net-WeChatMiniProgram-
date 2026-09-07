@@ -42,7 +42,9 @@ namespace OpenAuth.App.Repair
             {
                 query = query.Where(x => x.Status == request.Status.Value);
             }
-
+           //// 只要能 new 出来，说明引用成功
+           //var client = new WechatApiClient(new WechatApiClientOptions());
+           // Console.WriteLine("引用成功！");
             // 手机号模糊搜索
             if (!string.IsNullOrEmpty(request.Phone))
             {

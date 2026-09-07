@@ -2,6 +2,7 @@ using Infrastructure;
 using Infrastructure.Cache;
 using Infrastructure.Domain;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenAuth.App.Interface;
 using OpenAuth.Repository.Domain;
@@ -18,6 +19,7 @@ namespace OpenAuth.App.SSO
         private IHttpContextAccessor _httpContextAccessor;
         private IOptions<AppSetting> _appConfiguration;
         private SysLogApp _logApp;
+        private readonly ILogger<LocalAuth> _logger;
 
         private AuthContextFactory _app;
         private LoginParse _loginParse;
@@ -27,7 +29,7 @@ namespace OpenAuth.App.SSO
         public LocalAuth(IHttpContextAccessor httpContextAccessor
             , AuthContextFactory app
             , LoginParse loginParse
-            , ICacheContext cacheContext, IOptions<AppSetting> appConfiguration, SysLogApp logApp, ISqlSugarClient sugarClient)
+            , ICacheContext cacheContext, IOptions<AppSetting> appConfiguration, SysLogApp logApp, ISqlSugarClient sugarClient, ILogger<LocalAuth> logger)
         {
             _httpContextAccessor = httpContextAccessor;
             _app = app;
@@ -36,6 +38,7 @@ namespace OpenAuth.App.SSO
             _appConfiguration = appConfiguration;
             _logApp = logApp;
             _sugarClient = sugarClient;
+            _logger = logger;
         }
 
         /// <summary>
@@ -233,6 +236,9 @@ namespace OpenAuth.App.SSO
             return JwtTokenHelper.GetSessionId(token);
         }
 
+        /// <summary>
+        /// 检查登录状态
+        /// </summary>
         public bool CheckLogin(string token = "", string otherInfo = "")
         {
             if (_appConfiguration.Value.IsIdentityAuth)
@@ -256,21 +262,35 @@ namespace OpenAuth.App.SSO
                 var principal = JwtTokenHelper.ValidateToken(token, _appConfiguration.Value.JwtSecret);
                 if (principal == null)
                 {
+                    _logger.LogWarning($"[CheckLogin] Token验证失败, Token={token?.Substring(0, Math.Min(20, token?.Length ?? 0))}...");
                     return false;
                 }
 
-                // 检查会话是否在缓存中（确保未被登出失效）
+                // 检查会话是否在缓存中
                 var sessionId = GetSessionIdFromToken(token);
                 if (string.IsNullOrEmpty(sessionId))
                 {
+                    _logger.LogWarning($"[CheckLogin] 无法提取SessionId, Token={token?.Substring(0, Math.Min(20, token?.Length ?? 0))}...");
                     return false;
                 }
 
-                var result = _cacheContext.Get<UserAuthSession>(sessionId) != null;
+                var session = _cacheContext.Get<UserAuthSession>(sessionId);
+                var result = session != null;
+
+                if (!result)
+                {
+                    _logger.LogWarning($"[CheckLogin] Session不存在, SessionId={sessionId}");
+                }
+                else
+                {
+                    _logger.LogInformation($"[CheckLogin] 验证通过, Account={session.Account}, SessionId={sessionId}");
+                }
+
                 return result;
             }
             catch (Exception ex)
             {
+                _logger.LogError($"[CheckLogin] 异常: {ex.Message}");
                 return false;
             }
         }

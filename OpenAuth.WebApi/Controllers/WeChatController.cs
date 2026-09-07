@@ -7,6 +7,9 @@ using OpenAuth.App.SSO;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+//using SKIT.FlurlHttpClient;
+//using SKIT.FlurlHttpClient.Wechat.Api;
+//using SKIT.FlurlHttpClient.Wechat.TenpayV3;
 
 namespace OpenAuth.WebApi.Controllers
 {
@@ -35,6 +38,10 @@ namespace OpenAuth.WebApi.Controllers
         [AllowAnonymous]
         public async Task<LoginResult> MiniProgramLoginWithPhone([FromBody] WxMiniProgramLoginWithPhoneRequest request)
         {
+            // 只要能 new 出来，说明引用成功
+            //var client = new WechatApiClient(new WechatApiClientOptions());
+            Console.WriteLine("引用成功！");
+
             var result = new LoginResult();
             try
             {

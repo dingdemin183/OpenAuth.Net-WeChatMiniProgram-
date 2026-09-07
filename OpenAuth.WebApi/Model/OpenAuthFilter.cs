@@ -44,7 +44,7 @@ namespace OpenAuth.WebApi.Model
                 context.Result = new JsonResult(new Response
                 {
                     Code = 401,
-                    Message = "登录已过期，请重新登录"
+                    Message = "CheckLogin方法调用，登录已过期，请重新登录"
                 });
                 return;
             }

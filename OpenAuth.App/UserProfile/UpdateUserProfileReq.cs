@@ -13,7 +13,7 @@ namespace OpenAuth.App.Request
         public string NickName { get; set; }
 
         /// <summary>
-        /// 头像永久URL（通过上传接口获得）
+        /// 头像URL
         /// </summary>
         public string AvatarUrl { get; set; }
     }

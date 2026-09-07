@@ -60,13 +60,6 @@ namespace OpenAuth.App.ProductManager
                 throw new Exception("商品价格错误");
             }
 
-            // 同步检测商品图片（不需要openId，立即返回结果）
-            var isImageSafe = await _securityService.CheckImageSecuritySyncAsync(req.ImageUrl);
-            if (!isImageSafe)
-            {
-                throw new CommonException("商品图片包含违规内容，请更换后重试");
-            }
-
             var product = new Product
             {
                 Id = Guid.NewGuid().ToString("N"),
@@ -94,7 +87,6 @@ namespace OpenAuth.App.ProductManager
         /// <exception cref="Exception"></exception>
         public async Task<string> Update(UpdateProductReq req)
         {
-
             if (req == null)
             {
                 throw new Exception("请求参数不能为空");
@@ -125,12 +117,6 @@ namespace OpenAuth.App.ProductManager
             if (product == null)
                 throw new Exception("商品不存在");
 
-
-            var isImageSafe = await _securityService.CheckImageSecuritySyncAsync(req.ImageUrl);
-            if (!isImageSafe)
-            {
-                throw new CommonException("商品图片包含违规内容，请更换后重试");
-            }
             product.Name = req.Name;
             product.Price = req.Price;
             product.ImageUrl = req.ImageUrl;
@@ -144,6 +130,8 @@ namespace OpenAuth.App.ProductManager
                      .ConfigureAwait(false);
             return product.Id;
         }
+
+       
 
 
         /// <summary>

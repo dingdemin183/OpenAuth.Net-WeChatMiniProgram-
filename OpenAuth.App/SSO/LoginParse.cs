@@ -186,6 +186,9 @@ namespace OpenAuth.App.SSO
                     _appConfiguration.Value.JwtSecret,
                     expireDays
                 );
+
+                _logger.LogInformation($"[微信登录] 成功, OpenId={openId}, Phone={phoneNumber}, SessionId={sessionId}, Token={jwtToken},expiredays={expireDays}");
+
                 result.Code = 200;
                 result.Token = jwtToken;
                 result.Message = "登录成功";
@@ -203,9 +206,6 @@ namespace OpenAuth.App.SSO
             return result;
         }
 
-        /// <summary>
-        /// 根据 OpenId 查找或创建用户，并保存手机号
-        /// </summary>
         /// <summary>
         /// 根据 OpenId 查找或创建用户，并保存手机号
         /// </summary>

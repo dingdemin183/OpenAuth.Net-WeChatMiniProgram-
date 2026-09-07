@@ -1,5 +1,6 @@
 ﻿using Autofac;
 using Infrastructure;
+using Infrastructure.Cache;
 using Infrastructure.Extensions.AutofacManager;
 using Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -20,6 +21,7 @@ using OpenAuth.Repository;
 using OpenAuth.WebApi.Middleware;
 using OpenAuth.WebApi.Model;
 using SqlSugar;
+using StackExchange.Redis;
 using Swashbuckle.AspNetCore.SwaggerUI;
 using System;
 using System.Collections.Generic;
@@ -163,6 +165,16 @@ namespace OpenAuth.WebApi
                     options.SerializerSettings.DateFormatString = "yyyy-MM-dd HH:mm:ss";
                 });
             services.AddMemoryCache();
+
+            // 注册 Redis 连接（单例）
+            var redisConfig = Configuration["AppSetting:RedisConf"];
+            services.AddSingleton<ConnectionMultiplexer>(sp =>
+                ConnectionMultiplexer.Connect(redisConfig));
+
+            // 注册 CacheContext（作用域）
+            services.AddScoped<ICacheContext, CacheContext>();
+
+
             services.AddCors();
             services.AddDbContext<OpenAuthDBContext>();
 
@@ -292,7 +304,7 @@ namespace OpenAuth.WebApi
 
                     //var allowedController = "UserProfile";
                     //var allowedController = new List<string> { "UserFile" };
-                    var allowedControllers = new List<string> { "UserProfile", "File", "Products", "RepairOrders", "WeChat", "Check","Warranty" };
+                    var allowedControllers = new List<string> { "UserProfile", "File", "Products", "RepairOrders", "WeChat", "Check","Warranty"};
 
                     foreach (var controller in GetControllers())
                     {

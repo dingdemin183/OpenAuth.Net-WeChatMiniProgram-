@@ -23,6 +23,9 @@
     <None Remove="log\**" />
     <None Remove="wwwroot\**" />
     <EmbeddedResource Include="index.html" />
+    <None Update="Certificate\apiclient_test_key.pem">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <None Update="swagger\index.html">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -43,6 +46,8 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="NUnit" Version="3.13.1" />
     <PackageReference Include="NUnit3TestAdapter" Version="3.17.0" />
+    <PackageReference Include="SKIT.FlurlHttpClient.Wechat.Api" Version="3.4.0" />
+    <PackageReference Include="SKIT.FlurlHttpClient.Wechat.TenpayV3" Version="3.9.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="5.5.0" />
   </ItemGroup>
 

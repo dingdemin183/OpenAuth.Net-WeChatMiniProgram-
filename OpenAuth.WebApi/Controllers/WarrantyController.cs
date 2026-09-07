@@ -33,76 +33,7 @@ namespace OpenAuth.WebApi.Controllers
             _auth = auth;
         }
 
-        /// <summary>
-        /// 测试微信支付V3签名（使用官方示例数据）
-        /// </summary>
-        /// <returns></returns>
-        [HttpGet]
-        [ApiExplorerSettings(IgnoreApi = true)]
-        [AllowAnonymous]
-        public Response<object> TestSign()
-        {
-            var result = new Response<object>();
-            try
-            {
-                // 调用测试方法
-                var testResult = _wxPayService.TestSign();
-
-                result.Code = 200;
-                result.Message = "测试完成";
-                result.Data = testResult;
-            }
-            catch (Exception ex)
-            {
-                result.Code = 500;
-                result.Message = $"测试失败：{ex.Message}";
-            }
-            return result;
-        }
-        //测试签名工具类
-        [HttpGet]
-        [ApiExplorerSettings(IgnoreApi = true)]
-        [AllowAnonymous]
-        public IActionResult TestSignWithSigner()
-        {
-            try
-            {
-                // 使用配置中的证书路径（或直接使用测试路径）
-                var privateKeyPath = @"C:\NewOpenAuth\OpenAuth.Net-WeChatMiniProgram-\OpenAuth.WebApi\Certificates\apiclient_key.pem";
-
-                var mchId = "1900007291";
-                var serialNo = "408B07E79B8269FEC3D5D3E6AB8ED163A6A380DB";
-
-                var signer = new WeChatPayV3Signer(privateKeyPath, mchId, serialNo);
-
-                // 官方测试数据
-                var method = "POST";
-                var url = "/v3/pay/transactions/jsapi";
-                var timestamp = "1554208460";
-                var nonceStr = "593BEC0C930BF1AFEB40B4A08C8FB242";
-                var body = "{\"appid\":\"wxd678efh567hg6787\",\"mchid\":\"1900007291\",\"description\":\"Image形象店-深圳腾大-QQ公仔\",\"out_trade_no\":\"1217752501201407033233368018\",\"notify_url\":\"https://www.weixin.qq.com/wxpay/pay.php\",\"amount\":{\"total\":100,\"currency\":\"CNY\"},\"payer\":{\"openid\":\"oUpF8uMuAJO_M2pxb1Q9zNjWeS6o\"}}";
-
-                var expectedSignature = "jnks4dlrPw3ZX+ozVvSK39oa0t7OMBsg83BHAwd8BRdUFiVaQNTLTvci+wURgP1OQBbKYhFGvt7iqYpDSTQkp7Uq1sltaQKyncCyrA1g88m5bsKERQfPyT0ahSwKTYJ1CAn9QiJuSJRq1QsQs07eehbU/k9BCS51jTyc1Jpsi2H77HF9f/BnjXAOP3/sPObg6V5Ee4EzwLox684hhuMuIwHo7D8KFk3LIHOKDcNI4It1aCXydFWNpNK+SG86VUDe5kwoDpw4Ulqfu9z8OFDGbDs9TCxEv8iqQzbpxOlEVoOe2kalSYM5kApQb3nZcxdUtoE0liJGW3RGUNE0t4v01A==";
-
-                // 使用 signer 生成签名
-                var actualSignature = signer.Sign($"{method}\n{url}\n{timestamp}\n{nonceStr}\n{body}\n");
-                var authorization = signer.GenerateAuthorization(method, url, body, nonceStr, timestamp);
-
-                return Ok(new
-                {
-                    ExpectedSignature = expectedSignature,
-                    ActualSignature = actualSignature,
-                    IsMatch = expectedSignature == actualSignature,
-                    Authorization = authorization,
-                    Note = expectedSignature == actualSignature ? "签名工具类正确！" : "签名不匹配"
-                });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { Error = ex.Message });
-            }
-        }
-
+       
         /// <summary>
         /// 后台管理 - 查询延保卡列表
         /// </summary>
@@ -120,7 +51,6 @@ namespace OpenAuth.WebApi.Controllers
         /// <param name="request">请求参数</param>
         /// <returns></returns>
         [HttpPost]
-        [ApiExplorerSettings(IgnoreApi = true)]
         public async Task<Response<WeChatPayResp>> CreatePayOrder([FromBody] CreateWarrantyPayOrderReq request)
         {
             var result = new Response<WeChatPayResp>();
@@ -143,7 +73,6 @@ namespace OpenAuth.WebApi.Controllers
         /// 延保订单审核（通过/拒绝，拒绝时自动退款）
         /// </summary>
         [HttpPost]
-        [ApiExplorerSettings(IgnoreApi = true)]
         public async Task<Response<bool>> AuditWarrantyOrder([FromBody] AuditWarrantyOrderReq request)
         {
             var result = new Response<bool>();
