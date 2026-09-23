@@ -104,6 +104,6 @@ namespace OpenAuth.App.Response
         /// <summary>
         /// 剩余天数
         /// </summary>
-        public int RemainingDays { get; set; }
+        public string RemainingDays { get; set; }
     }
 }

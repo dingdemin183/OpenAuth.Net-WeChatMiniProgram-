@@ -55,6 +55,11 @@ namespace Infrastructure
         public string RedisConf { get; set; }
 
         /// <summary>
+        /// 图片基础地址
+        /// </summary>
+        public string BaseUrl { get; set; }
+
+        /// <summary>
         /// JWT签名密钥，用于本地认证模式下生成和验证JWT Token
         /// </summary>
         public string JwtSecret { get; set; } = "openauth_default_jwt_secret_key_2024";
@@ -117,9 +122,19 @@ namespace Infrastructure
         public string PrivateKeyPath { get; set; }
 
         /// <summary>
-        /// 微信支付平台证书路径(微信支付的公钥，用于回调验签）
+        /// 微信支付公钥ID（PUB_KEY_ID_ 开头，商户平台 API安全 页面查看）
         /// </summary>
-        public string PlatformCertPath { get; set; }
+        public string PlatformPublicKeyId { get; set; }
+
+        /// <summary>
+        /// 微信支付公钥文件路径（pub_key.pem，从商户平台下载）
+        /// </summary>
+        public string PlatformPublicKeyPath { get; set; }
+
+        /// <summary>
+        /// 微信支付平台证书路径(用于回调验签,此验签方式废弃，改用微信支付公钥验签）
+        /// </summary>
+        /// public string PlatformCertPath { get; set; }
 
         /// <summary>
         /// API V3 密钥（用于回调解密）
@@ -149,6 +164,18 @@ namespace Infrastructure
             if (!File.Exists(fullPath))
                 throw new FileNotFoundException($"私钥文件不存在: {fullPath}");
 
+            return File.ReadAllText(fullPath);
+        }
+        /// <summary>
+        /// 读取微信支付公钥内容（是公钥 pem，不是证书）
+        /// </summary>
+        public string GetPlatformPublicKeyContent()
+        {
+            if (string.IsNullOrEmpty(PlatformPublicKeyPath))
+                throw new InvalidOperationException("微信支付公钥路径未配置");
+            var fullPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, PlatformPublicKeyPath);
+            if (!File.Exists(fullPath))
+                throw new FileNotFoundException($"微信支付公钥文件不存在: {fullPath}");
             return File.ReadAllText(fullPath);
         }
     }

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using OpenAuth.App.SSO;
 using System;
 using System.IO;
@@ -15,13 +16,87 @@ namespace OpenAuth.App
     {
         private readonly IWebHostEnvironment _env;
         private readonly ILogger<FileUploadApp> _logger;
-        private readonly IConfiguration _configuration;
+        private readonly AppSetting _appSetting;
+     
 
-        public FileUploadApp(IWebHostEnvironment env, ILogger<FileUploadApp> logger, IConfiguration configuration)
+        public FileUploadApp(IWebHostEnvironment env, ILogger<FileUploadApp> logger, IOptions<AppSetting> appSettingOptions)
         {
             _env = env;
             _logger = logger;
-            _configuration = configuration;
+            _appSetting = appSettingOptions?.Value
+                ?? throw new InvalidOperationException("AppSetting 配置未找到");
+        }
+        public async Task<string> UploadProductImage(IFormFile file)
+        {
+            // 校验：文件是否为空
+            if (file == null || file.Length == 0)
+            {
+                throw new CommonException("请选择要上传的图片");
+            }
+
+            // 校验文件大小（限制 2MB）
+            var maxSize = 2 * 1024 * 1024; // 2MB
+            if (file.Length > maxSize)
+            {
+                throw new CommonException($"图片大小不能超过 {maxSize / 1024 / 1024}MB,请处理后上传");
+            }
+
+            // 校验：文件格式
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp" };
+            var extension = Path.GetExtension(file.FileName).ToLower();
+            if (!Array.Exists(allowedExtensions, ext => ext == extension))
+            {
+                throw new CommonException("只允许上传图片格式（jpg, jpeg, png, gif, webp, bmp）");
+            }
+
+            // 生成文件名（GUID + 扩展名）
+            var fileName = $"{Guid.NewGuid()}{extension}";
+
+            var datePath = DateTime.Now.ToString("yyyy/MM/dd");
+            var relativePath = Path.Combine("uploads/image", datePath);
+
+            // 获取 ContentRootPath（程序运行目录）
+            var contentRootPath = _env.ContentRootPath; // C:\publish\Deshuai
+
+            // 构建 wwwroot 路径
+            var webRootPath = Path.Combine(contentRootPath, "wwwroot");
+
+            // 关键：如果 wwwroot 不存在，自动创建
+            if (!Directory.Exists(webRootPath))
+            {
+                Directory.CreateDirectory(webRootPath);
+                _logger.LogInformation("已创建 wwwroot 目录: {WebRootPath}", webRootPath);
+            }
+
+            var absolutePath = Path.Combine(webRootPath, relativePath);
+
+            // 确保子目录存在
+            if (!Directory.Exists(absolutePath))
+            {
+                Directory.CreateDirectory(absolutePath);
+            }
+
+            var fullPath = Path.Combine(absolutePath, fileName);
+
+            using (var stream = new FileStream(fullPath, FileMode.Create))
+            {
+                await file.CopyToAsync(stream);
+            }
+
+            // 返回完整 URL
+            // 从配置读取基础 URL
+            var baseUrl = _appSetting.BaseUrl;
+
+
+            // 如果没有配置，使用默认值（开发环境）
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                //baseUrl = "http://192.168.10.99:8099";
+                throw new CommonException("请配置 AppSettings:BaseUrl");
+            }
+
+            // 返回完整 URL
+            return $"{baseUrl}/{relativePath.Replace("\\", "/")}/{fileName}";
         }
 
         ///// <summary>
@@ -80,75 +155,6 @@ namespace OpenAuth.App
         //    // 返回访问 URL
         //    return $"/{relativePath.Replace("\\", "/")}/{fileName}";
         //}
-        public async Task<string> UploadProductImage(IFormFile file)
-        {
-            // 校验：文件是否为空
-            if (file == null || file.Length == 0)
-            {
-                throw new CommonException("请选择要上传的图片");
-            }
 
-            // 校验文件大小（限制 2MB）
-            var maxSize = 2 * 1024 * 1024; // 2MB
-            if (file.Length > maxSize)
-            {
-                throw new CommonException($"图片大小不能超过 {maxSize / 1024 / 1024}MB,请处理后上传");
-            }
-
-            // 校验：文件格式
-            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp" };
-            var extension = Path.GetExtension(file.FileName).ToLower();
-            if (!Array.Exists(allowedExtensions, ext => ext == extension))
-            {
-                throw new CommonException("只允许上传图片格式（jpg, jpeg, png, gif, webp, bmp）");
-            }
-
-            // 生成文件名（GUID + 扩展名）
-            var fileName = $"{Guid.NewGuid()}{extension}";
-
-            var datePath = DateTime.Now.ToString("yyyy/MM/dd");
-            var relativePath = Path.Combine("uploads/image", datePath);
-
-            // 获取 ContentRootPath（程序运行目录）
-            var contentRootPath = _env.ContentRootPath; // C:\publish\Deshuai
-
-            // 构建 wwwroot 路径
-            var webRootPath = Path.Combine(contentRootPath, "wwwroot");
-
-            // ===== 关键：如果 wwwroot 不存在，自动创建 =====
-            if (!Directory.Exists(webRootPath))
-            {
-                Directory.CreateDirectory(webRootPath);
-                _logger.LogInformation("已创建 wwwroot 目录: {WebRootPath}", webRootPath);
-            }
-
-            var absolutePath = Path.Combine(webRootPath, relativePath);
-
-            // 确保子目录存在
-            if (!Directory.Exists(absolutePath))
-            {
-                Directory.CreateDirectory(absolutePath);
-            }
-
-            var fullPath = Path.Combine(absolutePath, fileName);
-
-            using (var stream = new FileStream(fullPath, FileMode.Create))
-            {
-                await file.CopyToAsync(stream);
-            }
-
-            // ===== 修改这里：返回完整 URL =====
-            // 从配置读取基础 URL
-            var baseUrl = _configuration["AppSettings:BaseUrl"];
-
-            // 如果没有配置，使用默认值（开发环境）
-            if (string.IsNullOrEmpty(baseUrl))
-            {
-                baseUrl = "http://192.168.10.99:8099"; // 你的 IIS 地址
-            }
-
-            // 返回完整 URL
-            return $"{baseUrl}/{relativePath.Replace("\\", "/")}/{fileName}";
-        }
     }
 }

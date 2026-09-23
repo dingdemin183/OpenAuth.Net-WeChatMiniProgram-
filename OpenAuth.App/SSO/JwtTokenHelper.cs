@@ -23,9 +23,11 @@ namespace OpenAuth.App.SSO
         /// <returns>JWT Token字符串</returns>
         public static string GenerateToken(string account, string name, string appKey, string sessionId, string secret, int expireDays = 10)
         {
+            //创建签名密钥
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(EnsureKeyLength(secret)));
+            //创建签名凭据，签名算法+密钥
             var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
+            //创建Claim (用户信息）
             var claims = new[]
             {
                 new Claim(JwtRegisteredClaimNames.Sub, account),
@@ -33,15 +35,15 @@ namespace OpenAuth.App.SSO
                 new Claim("name", name ?? string.Empty),
                 new Claim("app_key", appKey ?? string.Empty),
             };
-
+            //创建JWT对象，使用构造函数初始化  把用户信息打包成一个 JWT Token
             var token = new JwtSecurityToken(
-                issuer: "OpenAuth",
-                audience: "OpenAuth",
-                claims: claims,
-                expires: DateTime.UtcNow.AddDays(expireDays),
-                signingCredentials: credentials
+                issuer: "OpenAuth",       //签发者
+                audience: "OpenAuth",      //接收方
+                claims: claims,     //用户信息
+                expires: DateTime.UtcNow.AddDays(expireDays),  //过期时间
+                signingCredentials: credentials   //签名算法+密钥
             );
-
+            //返回JWT Token字符串 把 JwtSecurityToken 对象转成字符串
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
 
@@ -55,24 +57,26 @@ namespace OpenAuth.App.SSO
         {
             if (string.IsNullOrEmpty(token))
                 return null;
-
+            //创建JwtSecurityTokenHandler JWT处理器
             var tokenHandler = new JwtSecurityTokenHandler();
+            //创建验证密钥，和生成token时的密钥保持一致
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(EnsureKeyLength(secret)));
 
             try
             {
+                //创建Token验证参数
                 var validationParameters = new TokenValidationParameters
                 {
-                    ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = key,
-                    ValidateIssuer = true,
-                    ValidIssuer = "OpenAuth",
-                    ValidateAudience = true,
-                    ValidAudience = "OpenAuth",
-                    ValidateLifetime = true,
-                    ClockSkew = TimeSpan.FromMinutes(5)
+                    ValidateIssuerSigningKey = true,     //验证签名
+                    IssuerSigningKey = key,     //密钥
+                    ValidateIssuer = true,      //验证签发者
+                    ValidIssuer = "OpenAuth",   //签发者
+                    ValidateAudience = true,     //验证接收方
+                    ValidAudience = "OpenAuth",  //接收方
+                    ValidateLifetime = true,        //验证过期时间
+                    ClockSkew = TimeSpan.FromMinutes(5)//允许的时钟偏差
                 };
-
+                //验证token并返回ClaimsPrincipal
                 var principal = tokenHandler.ValidateToken(token, validationParameters, out _);
                 return principal;
             }

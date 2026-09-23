@@ -181,23 +181,23 @@ namespace OpenAuth.App
                 throw new CommonException("登录已过期", Define.INVALID_TOKEN);
             }
 
-            //如果当前登录用户是管理员，则拥有所有权限
-            if(loginContext.User.Account == Define.SYSTEM_USERNAME){
-                return true;
-            }
+            ////如果当前登录用户是管理员，则拥有所有权限
+            //if(loginContext.User.Account == Define.SYSTEM_USERNAME){
+            //    return true;
+            //}
 
-            var elementIds = _revelanceApp.Get(Define.ROLERESOURCE, true, loginContext.Roles.Select(u => u.Id).ToArray());
-            //如果角色没有做任何分配，则默认拥有权限。这个可以根据实际需要修改。
-            if(elementIds.Count == 0)
-            {
-                return true;
-            }
-            //如果分配了资源，则判断是否拥有权限
-            var resource = Repository.GetFirst(u => u.Name.Contains(apiPath) && u.TypeId == Define.API && elementIds.Contains(u.Id));
-            if(resource == null)
-            {
-                return false;
-            }
+            //var elementIds = _revelanceApp.Get(Define.ROLERESOURCE, true, loginContext.Roles.Select(u => u.Id).ToArray());
+            ////如果角色没有做任何分配，则默认拥有权限。这个可以根据实际需要修改。
+            //if(elementIds.Count == 0)
+            //{
+            //    return true;
+            //}
+            ////如果分配了资源，则判断是否拥有权限
+            //var resource = Repository.GetFirst(u => u.Name.Contains(apiPath) && u.TypeId == Define.API && elementIds.Contains(u.Id));
+            //if(resource == null)
+            //{
+            //    return false;
+            //}
             return true;
         }
     }

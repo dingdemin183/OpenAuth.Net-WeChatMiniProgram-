@@ -269,3 +269,11 @@ __pycache__/
 *.pubxml
 /OpenAuth.WebApi/temp-keys
 /newdocs/docs/.vuepress/.cache
+
+
+# 忽略 OpenAuth.WebApi 下的敏感配置文件
+OpenAuth.WebApi/appsettings.json
+OpenAuth.WebApi/appsettings.Production.json
+
+# 忽略整个证书文件夹
+OpenAuth.WebApi/Certificate/

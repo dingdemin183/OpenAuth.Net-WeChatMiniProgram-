@@ -79,7 +79,7 @@ namespace OpenAuth.App.SSO
                     throw new Exception("账号状态异常，可能已停用");
                 }
 
-                var sessionId = Guid.NewGuid().ToString("N");
+                var sessionId = "deshuai_login_" + Guid.NewGuid().ToString("N");
                 var expireDays = _appConfiguration.Value.JwtExpireDays;
 
                 var currentSession = new UserAuthSession
@@ -93,6 +93,7 @@ namespace OpenAuth.App.SSO
 
                 _cacheContext.Set(sessionId, currentSession, TimeHelper.Now.AddDays(expireDays));
 
+
                 var jwtToken = JwtTokenHelper.GenerateToken(
                     model.Account,
                     sysUserInfo.Name,
@@ -101,6 +102,10 @@ namespace OpenAuth.App.SSO
                     _appConfiguration.Value.JwtSecret,
                     expireDays
                 );
+                // _logger.LogInformation($"[登录] CacheContext哈希码：{_cacheContext.GetHashCode()}");
+        
+                //  _logger.LogInformation($"[登录] 已写入Key={sessionId}");
+                _logger.LogInformation($"[账号密码登录] 成功, SessionId={sessionId}, Token={jwtToken},expiredays={expireDays}");
 
                 result.Code = 200;
                 result.Token = jwtToken;
@@ -134,7 +139,7 @@ namespace OpenAuth.App.SSO
                     result.Message = "获取微信 OpenId 失败";
                     return result;
                 }
-
+                
                 // 用 phoneCode 换手机号
                 var phoneResult = await _wxService.GetUserPhoneAsync(model.PhoneCode);
 
@@ -163,7 +168,7 @@ namespace OpenAuth.App.SSO
                 var userAuth = await GetOrCreateUserAuthWithPhoneAsync(openId, phoneNumber, wxSessionResult.UnionId, sessionKey,userIp);
 
                 // 生成 Session 和 JWT Token 
-                var sessionId = Guid.NewGuid().ToString("N");
+                var sessionId = "deshuai_login_" + Guid.NewGuid().ToString("N");
                 var expireDays = _appConfiguration.Value.JwtExpireDays;
 
                 var currentSession = new UserAuthSession
@@ -194,7 +199,6 @@ namespace OpenAuth.App.SSO
                 result.Message = "登录成功";
                 result.Data = phoneNumber;
 
-                _logger.LogInformation($"微信一键登录成功: openId={openId}, phone={phoneNumber}");
             }
             catch (Exception ex)
             {
@@ -218,7 +222,7 @@ namespace OpenAuth.App.SSO
         {
             // 查询是否存在
             var existing = SugarClient.Queryable<SysUserExternalAuth>()
-                .First(x => x.OpenId == openId && !x.IsDeleted);
+                .First(x => x.OpenId == openId && x.IsDeleted == false);
 
             if (existing != null)
             {
@@ -299,7 +303,7 @@ namespace OpenAuth.App.SSO
                 throw new Exception("手机号不能为空");
 
             var userAuth = SugarClient.Queryable<SysUserExternalAuth>()
-                .First(x => x.OpenId == openId && !x.IsDeleted);
+                .First(x => x.OpenId == openId && x.IsDeleted == false);
 
             if (userAuth == null)
                 throw new Exception("用户不存在");

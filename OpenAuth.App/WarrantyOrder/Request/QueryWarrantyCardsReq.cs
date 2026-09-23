@@ -21,7 +21,7 @@ namespace OpenAuth.App.Request
         public int Limit { get; set; } = 10;
 
         /// <summary>
-        /// 关键词（模糊查询：用户ID、姓名、订单号）
+        /// 关键词（模糊查询：用户ID、姓名、电话）
         /// </summary>
         public string Key { get; set; }
 

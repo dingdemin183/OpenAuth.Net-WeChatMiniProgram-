@@ -23,7 +23,19 @@
     <None Remove="log\**" />
     <None Remove="wwwroot\**" />
     <EmbeddedResource Include="index.html" />
+    <None Update="Certificate\apiclient_key.pem">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <None Update="Certificate\apiclient_test_key.pem">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Certificate\pub_key.pem">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Certificate\pub_test_key.pem">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Certificate\wechatpay_test_platform_cert.pem">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <None Update="swagger\index.html">

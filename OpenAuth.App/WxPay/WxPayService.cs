@@ -1,22 +1,14 @@
-﻿
-using System;
-using System.Threading.Tasks;
+﻿using Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Infrastructure;
 using OpenAuth.App.Request;
 using SKIT.FlurlHttpClient.Wechat.TenpayV3;
 using SKIT.FlurlHttpClient.Wechat.TenpayV3.Models;
-
-using SKIT.FlurlHttpClient.Wechat.TenpayV3.Constants;
-using SKIT.FlurlHttpClient.Wechat.TenpayV3.Settings;
-using SKIT.FlurlHttpClient.Wechat.TenpayV3.Utilities;
+using System;
+using System.Threading.Tasks;
 
 namespace OpenAuth.App.WxPay
 {
-    /// <summary>
-    /// 微信支付服务（使用 SKIT 库）
-    /// </summary>
     public class WxPayService
     {
         private readonly WechatTenpayClient _client;
@@ -34,179 +26,115 @@ namespace OpenAuth.App.WxPay
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        /// <summary>
-        /// V3 统一下单（JSAPI/小程序）
-        /// </summary>
         public async Task<WeChatPayResp> UnifiedOrderAsync(
             CreateWarrantyPayOrderReq req,
             string openId,
             string outTradeNo)
         {
-            // 参数校验
-            if (req == null)
-                throw new ArgumentNullException(nameof(req));
+            ArgumentNullException.ThrowIfNull(req);
             if (req.Amount <= 0)
-                throw new ArgumentException("支付金额必须大于0");
+                throw new ArgumentException("支付金额必须大于0", nameof(req));
             if (string.IsNullOrEmpty(openId))
-                throw new ArgumentException("用户openid不能为空");
+                throw new ArgumentException("用户openid不能为空", nameof(openId));
             if (string.IsNullOrEmpty(outTradeNo))
-                throw new ArgumentException("商户订单号不能为空");
+                throw new ArgumentException("商户订单号不能为空", nameof(outTradeNo));
+            if (string.IsNullOrEmpty(_config.NotifyUrl))
+                throw new InvalidOperationException("微信支付回调地址未配置");
 
-            try
+            var description = $"延保-{req.ProductBrand}{req.ProductType}";
+            if (description.Length > 127)
+                description = description[..127];
+
+            var request = new CreatePayTransactionJsapiRequest
             {
-                // 商品描述（限制长度）
-                var description = $"延保-{req.ProductBrand}{req.ProductType}";
-                if (description.Length > 127)
-                    description = description[..127];
-
-                // 构建 SKIT 请求对象
-                var request = new CreatePayTransactionJsapiRequest()
+                AppId = _config.AppId,
+                MerchantId = _config.MchId,
+                Description = description,
+                OutTradeNumber = outTradeNo,
+                NotifyUrl = _config.NotifyUrl,
+                Amount = new CreatePayTransactionJsapiRequest.Types.Amount
                 {
-                    AppId = _config.AppId,
-                    MerchantId = _config.MchId,
-                    Description = description,
-                    OutTradeNumber = outTradeNo,
-                    NotifyUrl = _config.NotifyUrl,
-                    Amount = new CreatePayTransactionJsapiRequest.Types.Amount()
-                    {
-                        Total = (int)(req.Amount * 100),  // 元 → 分
-                        Currency = "CNY"
-                    },
-                    Payer = new CreatePayTransactionJsapiRequest.Types.Payer()
-                    {
-                        OpenId = openId
-                    }
-                };
-
-                //  调用统一下单
-                var response = await _client.ExecuteCreatePayTransactionJsapiAsync(request);
-                _logger.LogInformation("开始统一下单，订单号：{OutTradeNo}", outTradeNo);
-
-                if (response.IsSuccessful())
+                    Total = (int)Math.Round(req.Amount * 100, MidpointRounding.AwayFromZero),
+                    Currency = "CNY"
+                },
+                Payer = new CreatePayTransactionJsapiRequest.Types.Payer
                 {
-                    _logger.LogInformation("统一下单成功，订单号：{OutTradeNo}，PrepayId：{PrepayId}",
-                        outTradeNo, response.PrepayId);
-
-                    // 生成前端调起支付参数
-                    var payResult = BuildPayResult(response.PrepayId);
-                    return payResult;
+                    OpenId = openId
                 }
-                else
-                {
-                    _logger.LogError("统一下单失败：{ErrorCode} - {ErrorMessage}，订单号：{OutTradeNo}",
-                        response.ErrorCode, response.ErrorMessage, outTradeNo);
-                    throw new Exception($"统一下单失败：{response.ErrorMessage}");
-                }
-            }
-            catch (Exception ex)
+            };
+
+            _logger.LogInformation("开始统一下单，订单号：{OutTradeNo}", outTradeNo);
+
+            var response = await _client.ExecuteCreatePayTransactionJsapiAsync(request);
+
+            //响应写入日志
+            if (!response.IsSuccessful())
             {
-                _logger.LogError(ex, "统一下单异常，订单号：{OutTradeNo}", outTradeNo);
-                throw;
+                _logger.LogError("统一下单失败：{ErrorCode} - {ErrorMessage}，订单号：{OutTradeNo}",
+                    response.ErrorCode, response.ErrorMessage, outTradeNo);
+                throw new InvalidOperationException(
+                    $"统一下单失败：[{response.ErrorCode}] {response.ErrorMessage}");
             }
-        }
 
-        /// <summary>
-        /// 构建前端调起支付参数（使用 SKIT 客户端的 RSA 签名）
-        /// </summary>
-        public WeChatPayResp BuildPayResult(string prepayId)
-        {
-            var timeStamp = DateTimeOffset.Now.ToUnixTimeSeconds().ToString();
-            var nonceStr = GenerateNonceStr();
-            var package = $"prepay_id={prepayId}";
-            var signType = "RSA";
+            _logger.LogInformation("统一下单成功，订单号：{OutTradeNo}，PrepayId：{PrepayId}",
+                outTradeNo, response.PrepayId);
 
-            // 构建待签名串
-            var signStr = $"{_config.AppId}\n{timeStamp}\n{nonceStr}\n{package}\n";
-
-            //  使用 SKIT 客户端进行签名
-            // 我们需要从 client 中提取私钥，或者使用新的签名方法
-            var paySign = SignWithSKIT(signStr);
+            // 使用 SKIT 官方扩展方法生成调起参数（自动签名）
+            var parameters = _client.GenerateParametersForJsapiPayRequest(
+                appId: _config.AppId,
+                prepayId: response.PrepayId);
 
             return new WeChatPayResp
             {
-                AppId = _config.AppId,
-                TimeStamp = timeStamp,
-                NonceStr = nonceStr,
-                Package = package,
-                SignType = signType,
-                PaySign = paySign
+                AppId = parameters["appId"]!,
+                TimeStamp = parameters["timeStamp"]!,
+                NonceStr = parameters["nonceStr"]!,
+                Package = parameters["package"]!,
+                SignType = parameters["signType"]!,
+                PaySign = parameters["paySign"]!
             };
         }
-
         /// <summary>
-        /// 使用 SKIT 客户端的私钥进行 RSA 签名
+        /// 商户订单号查询订单（微信 V3）
         /// </summary>
-        private string SignWithSKIT(string signStr)
+        /// <param name="outTradeNo">商户订单号</param>
+        /// <returns></returns>
+        public async Task<GetPayTransactionByOutTradeNumberResponse> QueryTransactionByOutTradeNoAsync(string outTradeNo)
         {
-            // 方法：从 SKIT 客户端提取私钥内容
-            // 通过反射获取客户端内部的 Credentials
-            var credentialsField = typeof(WechatTenpayClient)
-                .GetProperty("Credentials", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            if (string.IsNullOrWhiteSpace(outTradeNo))
+                throw new ArgumentException("商户订单号不能为空", nameof(outTradeNo));
 
-            var credentials = credentialsField?.GetValue(_client);
-            var privateKeyField = credentials?.GetType()
-                .GetField("_merchantCertificatePrivateKey",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-            var privateKey = privateKeyField?.GetValue(credentials) as string;
-
-            if (string.IsNullOrEmpty(privateKey))
+            var request = new GetPayTransactionByOutTradeNumberRequest
             {
-                throw new Exception("无法从 SKIT 客户端获取私钥");
+                OutTradeNumber = outTradeNo,
+                MerchantId = _config.MchId
+            };
+
+            _logger.LogInformation("查询微信订单，订单号：{OutTradeNo}", outTradeNo);
+
+            var response = await _client.ExecuteGetPayTransactionByOutTradeNumberAsync(request);
+
+            if (!response.IsSuccessful())
+            {
+                // 订单不存在时，微信返回 404 ORDER_NOT_EXIST，这里返回 null 表示未查询到
+                if (response.ErrorCode == "ORDER_NOT_EXIST" )
+                {
+                    _logger.LogWarning("微信订单不存在，订单号：{OutTradeNo}", outTradeNo);
+                    return null;
+                }
+
+                _logger.LogError("查询微信订单失败：{ErrorCode} - {ErrorMessage}，订单号：{OutTradeNo}",
+                    response.ErrorCode, response.ErrorMessage, outTradeNo);
+
+                throw new InvalidOperationException(
+                    $"查询微信订单失败：[{response.ErrorCode}] {response.ErrorMessage}");
             }
 
-            // 执行 RSA 签名
-            return SignWithPrivateKey(signStr, privateKey);
-        }
+            _logger.LogInformation(
+                "查询微信订单成功，订单号：{OutTradeNo}，交易状态：{TradeState}，微信订单号：{TransactionId}",
+                outTradeNo, response.TradeState, response.TransactionId);
 
-        /// <summary>
-        /// RSA SHA256 签名
-        /// </summary>
-        private static string SignWithPrivateKey(string signStr, string privateKeyPem)
-        {
-            // 清理 PEM 格式
-            var privateKeyBase64 = privateKeyPem
-                .Replace("-----BEGIN PRIVATE KEY-----", "")
-                .Replace("-----END PRIVATE KEY-----", "")
-                .Replace("-----BEGIN RSA PRIVATE KEY-----", "")
-                .Replace("-----END RSA PRIVATE KEY-----", "")
-                .Replace("\r", "")
-                .Replace("\n", "")
-                .Trim();
-
-            var privateKeyBytes = Convert.FromBase64String(privateKeyBase64);
-            using var rsa = System.Security.Cryptography.RSA.Create();
-
-            try
-            {
-                rsa.ImportPkcs8PrivateKey(privateKeyBytes, out _);
-            }
-            catch
-            {
-                rsa.ImportRSAPrivateKey(privateKeyBytes, out _);
-            }
-
-            var data = System.Text.Encoding.UTF8.GetBytes(signStr);
-            var signedBytes = rsa.SignData(data,
-                System.Security.Cryptography.HashAlgorithmName.SHA256,
-                System.Security.Cryptography.RSASignaturePadding.Pkcs1);
-
-            return Convert.ToBase64String(signedBytes);
-        }
-
-        /// <summary>
-        /// 生成随机字符串（32位）
-        /// </summary>
-        private static string GenerateNonceStr()
-        {
-            const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-            var random = new Random();
-            var result = new char[32];
-            for (int i = 0; i < 32; i++)
-            {
-                result[i] = chars[random.Next(chars.Length)];
-            }
-            return new string(result);
+            return response;
         }
     }
 }

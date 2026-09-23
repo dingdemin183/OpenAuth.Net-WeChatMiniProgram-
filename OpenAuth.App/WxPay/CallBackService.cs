@@ -1,9 +1,6 @@
-﻿
 using Infrastructure;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using OpenAuth.App.Interface;
-using OpenAuth.App.Request;
 using OpenAuth.Repository.Domain;
 using OpenAuth.Repository.Enums;
 using SqlSugar;
@@ -18,7 +15,6 @@ namespace OpenAuth.App.WxPay
     public class CallBackService : SqlSugarBaseApp<WarrantyRecord>
     {
         private readonly ISqlSugarClient _db;
-        private readonly IAuth _auth;
         private readonly ILogger<CallBackService> _logger;
 
         public CallBackService(
@@ -27,7 +23,6 @@ namespace OpenAuth.App.WxPay
             ILogger<CallBackService> logger) : base(db, auth)
         {
             _db = db;
-            _auth = auth;
             _logger = logger;
         }
 
@@ -37,64 +32,77 @@ namespace OpenAuth.App.WxPay
         /// 处理支付成功业务逻辑
         /// </summary>
         /// <param name="payData">解密后的支付回调数据（SKIT TransactionResource）</param>
-        public async Task ProcessPaymentAsync(SKIT.FlurlHttpClient.Wechat.TenpayV3.Events.TransactionResource payData)
+        /// <returns>处理结果，Controller 据此决定返回状态码</returns>
+        public async Task<CallbackProcessResult> ProcessPaymentAsync(SKIT.FlurlHttpClient.Wechat.TenpayV3.Events.TransactionResource payData)
         {
             if (payData == null)
-                throw new ArgumentNullException(nameof(payData));
+                return CallbackProcessResult.PermanentFailure("回调数据为空");
+
+            var orderNo = payData.OutTradeNumber;
+            var transactionId = payData.TransactionId;
+            var totalFee = payData.Amount?.Total ?? 0;
 
             try
             {
-                // ⚠️ SKIT 库字段名为 OutTradeNumber（不是 OutTradeNo）
-                var orderNo = payData.OutTradeNumber;
-                var transactionId = payData.TransactionId;
-                var totalFee = payData.Amount?.Total ?? 0;
+                _logger.LogInformation("开始处理支付回调：订单号={OrderNo}，交易号={TransactionId}，金额={TotalFee}分",
+                    orderNo, transactionId, totalFee);
 
-                _logger.LogInformation($"开始处理支付成功回调，订单号：{orderNo}，交易号：{transactionId}");
-
-                // 查询订单
+                // 查询订单（查询在事务外，避免长事务）
                 var order = await _db.Queryable<WarrantyRecord>()
-                    .Where(o => o.OrderNo == orderNo && !o.IsDeleted)
+                    .Where(o => o.OrderNo == orderNo && o.IsDeleted == false)
                     .FirstAsync()
                     .ConfigureAwait(false);
 
                 if (order == null)
                 {
-                    _logger.LogWarning($"订单不存在：{orderNo}");
-                    return;
+                    _logger.LogWarning("支付回调订单不存在：{OrderNo}", orderNo);
+                    return CallbackProcessResult.PermanentFailure($"订单不存在：{orderNo}");
                 }
 
-                // 防止重复处理
+                // 已支付，幂等返回
                 if (order.OrderStatus == WarrantyStatusEnum.Paid)
                 {
-                    _logger.LogInformation($"订单已支付，忽略重复回调：{orderNo}");
-                    return;
+                    _logger.LogInformation("订单已支付，幂等忽略：{OrderNo}", orderNo);
+                    return CallbackProcessResult.AlreadyProcessed($"订单已支付：{orderNo}");
                 }
 
-                // 验证金额是否一致
-                var expectedAmount = (int)(order.Amount * 100);
+
+                var expectedAmount = (int)Math.Round(order.Amount * 100, MidpointRounding.AwayFromZero);
                 if (expectedAmount != totalFee)
                 {
-                    _logger.LogError($"金额不一致：订单金额{expectedAmount}分，支付金额{totalFee}分，订单号：{orderNo}");
-                    return;
+                    _logger.LogError("【金额不一致告警】订单号={OrderNo}，订单金额={Expected}分，支付金额={Actual}分，请人工对账",
+                        orderNo, expectedAmount, totalFee);
+                    return CallbackProcessResult.PermanentFailure(
+                        $"金额不一致：订单{expectedAmount}分，支付{totalFee}分");
                 }
 
-                // 更新订单支付状态
-                order.OrderStatus = WarrantyStatusEnum.Paid;
-                order.TransactionId = transactionId;
-                order.PayTime = DateTime.Now;
-                order.UpdateTime = DateTime.Now;
-
-                await _db.Updateable(order)
-                    .UpdateColumns(o => new { o.OrderStatus, o.TransactionId, o.PayTime, o.UpdateTime })
+                var now = DateTime.Now;
+                var affected = await _db.Updateable<WarrantyRecord>()
+                    .SetColumns(o => new WarrantyRecord
+                    {
+                        OrderStatus = WarrantyStatusEnum.Paid,
+                        TransactionId = transactionId,
+                        PayTime = now,
+                        UpdateTime = now
+                    })
+                    .Where(o => o.Id == order.Id && o.OrderStatus == WarrantyStatusEnum.Pending)
                     .ExecuteCommandAsync()
                     .ConfigureAwait(false);
 
-                _logger.LogInformation($"订单支付成功，订单号：{orderNo}，交易号：{transactionId}");
+                if (affected == 0)
+                {
+                    _logger.LogInformation("订单已被并发处理，幂等忽略：{OrderNo}", orderNo);
+                    return CallbackProcessResult.AlreadyProcessed($"订单已被并发处理：{orderNo}");
+                }
+
+                _logger.LogInformation("订单支付成功：{OrderNo}，交易号={TransactionId}", orderNo, transactionId);
+                return CallbackProcessResult.Success();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "处理支付业务逻辑失败");
-                throw;
+                // 临时性失败（数据库异常等），让微信重试
+                _logger.LogError(ex, "处理支付回调异常：{OrderNo}", orderNo);
+                return CallbackProcessResult.TemporaryFailure($"处理异常：{ex.Message}");
             }
         }
 
@@ -107,687 +115,146 @@ namespace OpenAuth.App.WxPay
         /// </summary>
         /// <param name="refundData">解密后的退款回调数据（SKIT RefundResource）</param>
         /// <param name="eventType">事件类型（REFUND.SUCCESS / REFUND.ABNORMAL / REFUND.CLOSED）</param>
-        public async Task ProcessRefundAsync(SKIT.FlurlHttpClient.Wechat.TenpayV3.Events.RefundResource refundData, string eventType)
+        /// <returns>处理结果，Controller 据此决定返回状态码</returns>
+        public async Task<CallbackProcessResult> ProcessRefundAsync(
+            SKIT.FlurlHttpClient.Wechat.TenpayV3.Events.RefundResource refundData, string eventType)
         {
             if (refundData == null)
-                throw new ArgumentNullException(nameof(refundData));
+                return CallbackProcessResult.PermanentFailure("回调数据为空");
+
+            var orderNo = refundData.OutTradeNumber;
+            var refundNo = refundData.OutRefundNumber;
+            var refundId = refundData.RefundId;
+            var refundAmount = refundData.Amount?.Refund ?? 0;
 
             try
             {
-                //  SKIT 库字段名：OutTradeNumber / OutRefundNumber
-                var orderNo = refundData.OutTradeNumber;
-                var refundNo = refundData.OutRefundNumber;
-                var refundId = refundData.RefundId;
-                var refundAmount = refundData.Amount?.Refund ?? 0;
-
-                _logger.LogInformation($"开始处理退款回调，订单号：{orderNo}，退款单号：{refundNo}，事件类型：{eventType}");
+                _logger.LogInformation("开始处理退款回调：订单号={OrderNo}，退款单号={RefundNo}，事件={EventType}",
+                    orderNo, refundNo, eventType);
 
                 // 查询订单
                 var order = await _db.Queryable<WarrantyRecord>()
-                    .Where(o => o.OrderNo == orderNo && !o.IsDeleted)
+                    .Where(o => o.OrderNo == orderNo && o.IsDeleted == false)
                     .FirstAsync()
                     .ConfigureAwait(false);
 
                 if (order == null)
                 {
-                    _logger.LogWarning($"订单不存在：{orderNo}");
-                    return;
+                    _logger.LogWarning("退款回调订单不存在：{OrderNo}", orderNo);
+                    // 同支付回调，订单不存在按永久失败处理（同步提交 + 时间差足够）
+                    return CallbackProcessResult.PermanentFailure($"订单不存在：{orderNo}");
                 }
-
-                // 防止重复处理
-                if (order.OrderStatus == WarrantyStatusEnum.Refunded)
+                // 同一笔退款（RefundId 相同）的重复回调直接幂等返回
+                if (!string.IsNullOrEmpty(order.RefundId) && order.RefundId == refundId)
                 {
-                    _logger.LogInformation($"订单已退款，忽略重复回调：{orderNo}");
-                    return;
+                    _logger.LogInformation("该退款单已处理，幂等忽略：{OrderNo}，{RefundId}", orderNo, refundId);
+                    return CallbackProcessResult.AlreadyProcessed($"退款单已处理：{refundId}");
                 }
 
-                //  退款状态由事件类型决定，SKIT 的 RefundResource 本身没有 RefundStatus 字段
-                switch (eventType)
+                var maxRefundAmount = (int)Math.Round(order.Amount * 100, MidpointRounding.AwayFromZero);
+                if (refundAmount <= 0 || refundAmount > maxRefundAmount)
                 {
-                    case "REFUND.SUCCESS":
-                        order.OrderStatus = WarrantyStatusEnum.Refunded;
-                        order.RefundNo = refundNo;
-                        order.RefundId = refundId;
-                        order.UpdateTime = DateTime.Now;
-
-                        await _db.Updateable(order)
-                            .UpdateColumns(o => new { o.OrderStatus, o.RefundNo, o.RefundId, o.UpdateTime })
-                            .ExecuteCommandAsync()
-                            .ConfigureAwait(false);
-
-                        _logger.LogInformation($"退款成功，订单号：{orderNo}，退款单号：{refundNo}");
-                        break;
-
-                    case "REFUND.ABNORMAL":
-                        order.OrderStatus = WarrantyStatusEnum.RefundFailed;
-                        order.AuditRemark = $"退款异常，微信退款单号：{refundId}";
-                        order.UpdateTime = DateTime.Now;
-
-                        await _db.Updateable(order)
-                            .UpdateColumns(o => new { o.OrderStatus, o.AuditRemark, o.UpdateTime })
-                            .ExecuteCommandAsync()
-                            .ConfigureAwait(false);
-
-                        _logger.LogWarning($"退款异常，订单号：{orderNo}，退款单号：{refundNo}");
-                        break;
-
-                    case "REFUND.CLOSED":
-                        order.OrderStatus = WarrantyStatusEnum.RefundFailed;
-                        order.AuditRemark = $"退款关闭，微信退款单号：{refundId}";
-                        order.UpdateTime = DateTime.Now;
-
-                        await _db.Updateable(order)
-                            .UpdateColumns(o => new { o.OrderStatus, o.AuditRemark, o.UpdateTime })
-                            .ExecuteCommandAsync()
-                            .ConfigureAwait(false);
-
-                        _logger.LogWarning($"退款关闭，订单号：{orderNo}，退款单号：{refundNo}");
-                        break;
-
-                    default:
-                        _logger.LogWarning($"未知退款事件类型：{eventType}，订单号：{orderNo}");
-                        break;
+                    _logger.LogError("【退款金额异常】订单号={OrderNo}，订单金额={Max}分，退款金额={Actual}分，请人工对账",
+                        orderNo, maxRefundAmount, refundAmount);
+                    return CallbackProcessResult.PermanentFailure(
+                        $"退款金额异常：订单{maxRefundAmount}分，退款{refundAmount}分");
                 }
+
+                var now = DateTime.Now;
+                int affected;
+                if (eventType == "REFUND.SUCCESS")
+                {
+                    // 终态：退款成功。只更新 RefundId 为空的订单，避免覆盖已有的成功退款记录
+                    affected = await _db.Updateable<WarrantyRecord>()
+                        .SetColumns(o => new WarrantyRecord
+                        {
+                            OrderStatus = WarrantyStatusEnum.Refunded,
+                            RefundNo = refundNo,
+                            RefundId = refundId,
+                            UpdateTime = now
+                        })
+                        .Where(o => o.Id == order.Id
+                            && (o.RefundId == null || o.RefundId == ""))
+                        .ExecuteCommandAsync()
+                        .ConfigureAwait(false);
+                }
+                else if (eventType == "REFUND.ABNORMAL" || eventType == "REFUND.CLOSED")
+                {
+                    var remark = eventType == "REFUND.ABNORMAL"
+                        ? $"退款异常，微信退款单号：{refundId}"
+                        : $"退款关闭，微信退款单号：{refundId}";
+
+                    affected = await _db.Updateable<WarrantyRecord>()
+                        .SetColumns(o => new WarrantyRecord
+                        {
+                            OrderStatus = WarrantyStatusEnum.RefundFailed,
+                            RefundNo = refundNo,
+                            AuditRemark = remark,
+                            UpdateTime = now
+                        })
+                        .Where(o => o.Id == order.Id
+                            && (o.RefundId == null || o.RefundId == ""))
+                        .ExecuteCommandAsync()
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    _logger.LogWarning("未知退款事件类型：{EventType}，订单号={OrderNo}", eventType, orderNo);
+                    return CallbackProcessResult.PermanentFailure($"未知事件类型：{eventType}");
+                }
+
+                if (affected == 0)
+                {
+                    // 被并发处理或已被处理，幂等返回
+                    _logger.LogInformation("退款回调被并发处理或已处理，幂等忽略：{OrderNo}，{RefundId}",
+                        orderNo, refundId);
+                    return CallbackProcessResult.AlreadyProcessed($"退款单已被处理：{refundId}");
+                }
+
+                _logger.LogInformation("退款回调处理完成：{OrderNo}，{RefundId}，{EventType}",
+                    orderNo, refundId, eventType);
+                return CallbackProcessResult.Success();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "处理退款业务逻辑失败");
-                throw;
+                _logger.LogError(ex, "处理退款回调异常：{OrderNo}", orderNo);
+                return CallbackProcessResult.TemporaryFailure($"处理异常：{ex.Message}");
             }
         }
 
         #endregion
     }
+
+    /// <summary>
+    /// 回调业务处理结果。Controller 据此决定返回给微信的状态码。
+    /// 微信约定：返回 2xx 不重试；返回非 2xx 会在 4 小时内重试最多 8 次。
+    /// </summary>
+    public class CallbackProcessResult
+    {
+        /// <summary>
+        /// true 表示临时性失败，应让微信重试（返回 500）；false 表示已处理或永久失败，不重试（返回 200/204）
+        /// </summary>
+        public bool ShouldRetry { get; set; }
+
+        /// <summary>
+        /// true 表示处理成功或幂等已处理；false 表示失败
+        /// </summary>
+        public bool IsSuccess { get; set; }
+
+        public string Message { get; set; }
+
+        public static CallbackProcessResult Success() =>
+            new CallbackProcessResult { IsSuccess = true, ShouldRetry = false, Message = "处理成功" };
+
+        public static CallbackProcessResult AlreadyProcessed(string msg) =>
+            new CallbackProcessResult { IsSuccess = true, ShouldRetry = false, Message = msg };
+
+        /// <summary>永久性失败（订单不存在、金额不一致等），不重试，需要人工对账</summary>
+        public static CallbackProcessResult PermanentFailure(string msg) =>
+            new CallbackProcessResult { IsSuccess = false, ShouldRetry = false, Message = msg };
+
+        /// <summary>临时性失败（数据库异常等），应让微信重试</summary>
+        public static CallbackProcessResult TemporaryFailure(string msg) =>
+            new CallbackProcessResult { IsSuccess = false, ShouldRetry = true, Message = msg };
+    }
 }
-
-
-
-// OpenAuth.App/WxPay/CallBackService.cs
-
-//using Infrastructure;
-//using Microsoft.Extensions.Logging;
-//using Microsoft.Extensions.Options;
-//using OpenAuth.App.Interface;
-//using OpenAuth.App.Request;
-//using OpenAuth.App.Warranty;
-//using OpenAuth.Repository.Domain;
-//using OpenAuth.Repository.Enums;
-//using SqlSugar;
-//using System;
-//using System.IO;
-//using System.Security.Cryptography;
-//using System.Security.Cryptography.X509Certificates;
-//using System.Text;
-//using System.Text.Json;
-//using System.Threading.Tasks;
-
-//namespace OpenAuth.App.WxPay
-//{
-//    /// <summary>
-//    /// 微信回调服务，处理微信回调请求
-//    /// </summary>
-//    public class CallBackService : SqlSugarBaseApp<WarrantyRecord>
-//    {
-//        private readonly ISqlSugarClient _db;
-//        private readonly IAuth _auth;
-//        private readonly IOptions<AppSetting> _appConfiguration;
-//        private readonly ILogger<CallBackService> _logger;
-
-//        public CallBackService(
-//            ISqlSugarClient db,
-//            IAuth auth,
-//            IOptions<AppSetting> appConfiguration,
-//            ILogger<CallBackService> logger) : base(db, auth)
-//        {
-//            _db = db;
-//            _auth = auth;
-//            _appConfiguration = appConfiguration;
-//            _logger = logger;
-//        }
-
-//        /// <summary>
-//        /// 更新订单状态
-//        /// </summary>
-//        /// <param name="payData"></param>
-//        /// <returns></returns>
-//        public async Task ProcessPaymentAsync(PayCallbackData payData)
-//        {
-//            // ... 你原有的更新订单状态的逻辑
-//        }
-
-//        /// <summary>
-//        /// 退款处理
-//        /// </summary>
-//        /// <param name="refundData"></param>
-//        /// <returns></returns>
-//        public async Task ProcessRefundAsync(RefundCallbackData refundData)
-//        {
-//            // ... 你原有的处理退款逻辑
-//        }
-
-
-//#region 验签
-
-///// <summary>
-///// 验证回调签名（V3）
-///// </summary>
-//public bool VerifyCallbackSignature(
-//    string requestBody,
-//    string wechatpaySignature,
-//    string wechatpayTimestamp,
-//    string wechatpayNonce,
-//    string wechatpaySerial)
-//{
-//    try
-//    {
-//        // 构建验签串
-//        var signStr = $"{wechatpayTimestamp}\n{wechatpayNonce}\n{requestBody}\n";
-
-//        // 获取微信支付平台证书（微信支付公钥）
-//        var certificate = GetPlatformCertificate(wechatpaySerial);
-
-//        // 使用证书公钥验签
-//        using var rsa = certificate.GetRSAPublicKey();
-//        var data = Encoding.UTF8.GetBytes(signStr);
-//        var signature = Convert.FromBase64String(wechatpaySignature);
-
-//        var isValid = rsa.VerifyData(data, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-
-//        if (!isValid)
-//        {
-//            _logger.LogWarning($"回调验签失败，serial_no: {wechatpaySerial}");
-//        }
-
-//        return isValid;
-//    }
-//    catch (Exception ex)
-//    {
-//        _logger.LogError(ex, "验签异常");
-//        return false;
-//    }
-//}
-
-///// <summary>
-///// 获取微信支付平台证书
-///// </summary>
-//private X509Certificate2 GetPlatformCertificate(string serialNo)
-//{
-//    try
-//    {
-//        var config = _appConfiguration.Value.WeChatPay;
-//        if (config == null)
-//            throw new InvalidOperationException("微信支付配置未找到");
-
-//        // 优先从配置的路径加载
-//        var certPath = config.PlatformCertPath;
-
-//        if (!string.IsNullOrEmpty(certPath) && File.Exists(certPath))
-//        {
-//            _logger.LogDebug("从配置路径加载平台证书: {CertPath}", certPath);
-//            return new X509Certificate2(certPath);
-//        }
-
-
-//        // 尝试在 Certificates 目录下查找
-//        var basePath = AppDomain.CurrentDomain.BaseDirectory;
-//        var fallbackPath = Path.Combine(basePath, "Certificates", "wechatpay_platform_cert.pem");
-//        if (File.Exists(fallbackPath))
-//        {
-//            _logger.LogDebug("从默认路径加载平台证书: {CertPath}", fallbackPath);
-//            return new X509Certificate2(fallbackPath);
-//        }
-
-//        // 如果都没有，抛出异常
-//        throw new FileNotFoundException(
-//            $"平台证书未找到，请检查配置。\n配置路径: {certPath}\n默认路径: {fallbackPath}\n证书序列号: {serialNo}"
-//        );
-//    }
-//    catch (Exception ex)
-//    {
-//        _logger.LogError(ex, "获取平台证书失败，序列号: {SerialNo}", serialNo);
-//        throw;
-//    }
-//}
-
-//#endregion
-
-//#region 解密
-
-///// <summary>
-///// 解密回调数据（V3）
-///// </summary>
-//public PayCallbackData DecryptCallbackData(CallbackResource resource)
-//{
-//    try
-//    {
-//        var config = _appConfiguration.Value.WeChatPay;
-//        var apiV3Key = config.ApiV3Key;
-
-//        if (string.IsNullOrEmpty(apiV3Key))
-//            throw new Exception("API V3 密钥未配置");
-
-//        if (resource.Algorithm != "AEAD_AES_256_GCM")
-//            throw new Exception($"不支持的加密算法: {resource.Algorithm}");
-
-//        // 解密
-//        var plaintext = AesGcmDecrypt(
-//            apiV3Key,
-//            resource.AssociatedData,
-//            resource.Nonce,
-//            resource.Ciphertext
-//        );
-
-//        // 解析 JSON
-//        var result = JsonSerializer.Deserialize<PayCallbackData>(plaintext, new JsonSerializerOptions
-//        {
-//            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-//        });
-
-//        return result;
-//    }
-//    catch (Exception ex)
-//    {
-//        _logger.LogError(ex, "解密回调数据失败");
-//        throw;
-//    }
-//}
-
-///// <summary>
-///// AES-256-GCM 解密
-///// </summary>
-//private string AesGcmDecrypt(string apiV3Key, string associatedData, string nonce, string ciphertext)
-//{
-//    try
-//    {
-//        var key = Encoding.UTF8.GetBytes(apiV3Key);
-//        var nonceBytes = Encoding.UTF8.GetBytes(nonce);
-//        var ciphertextBytes = Convert.FromBase64String(ciphertext);
-//        var associatedDataBytes = Encoding.UTF8.GetBytes(associatedData);
-
-//        using var aes = new AesGcm(key);
-
-//        var plaintextBytes = new byte[ciphertextBytes.Length];
-
-//        aes.Decrypt(nonceBytes, ciphertextBytes, associatedDataBytes, plaintextBytes);
-
-//        return Encoding.UTF8.GetString(plaintextBytes);
-//    }
-//    catch (Exception ex)
-//    {
-//        _logger.LogError(ex, "AES-GCM 解密失败");
-//        throw;
-//    }
-//}
-
-//#endregion
-
-//#region 核心处理方法
-
-///// <summary>
-///// 处理支付回调通知（V3）
-///// </summary>
-//public async Task<PayCallbackResult> HandlePayCallbackAsync(
-//    string requestBody,
-//    string wechatpaySignature,
-//    string wechatpayTimestamp,
-//    string wechatpayNonce,
-//    string wechatpaySerial)
-//{
-//    var result = new PayCallbackResult();
-
-//    try
-//    {
-//        //  验签
-//        var isValid = VerifyCallbackSignature(
-//            requestBody,
-//            wechatpaySignature,
-//            wechatpayTimestamp,
-//            wechatpayNonce,
-//            wechatpaySerial
-//        );
-
-//        if (!isValid)
-//        {
-//            result.Success = false;
-//            result.ErrorMessage = "签名验证失败";
-//            return result;
-//        }
-
-//        // 解析回调通知
-//        var notification = JsonSerializer.Deserialize<CallbackNotification>(requestBody, new JsonSerializerOptions
-//        {
-//            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-//        });
-
-//        if (notification == null)
-//        {
-//            result.Success = false;
-//            result.ErrorMessage = "解析回调通知失败";
-//            return result;
-//        }
-
-//        // 检查事件类型
-//        if (notification.EventType != "TRANSACTION.SUCCESS")
-//        {
-//            result.Success = true;
-//            result.Message = $"忽略事件类型: {notification.EventType}";
-//            return result;
-//        }
-
-//        // 解密数据
-//        var payData = DecryptCallbackData(notification.Resource);
-
-//        if (payData == null)
-//        {
-//            result.Success = false;
-//            result.ErrorMessage = "解密支付数据失败";
-//            return result;
-//        }
-
-//        // 业务处理
-//await ProcessPaymentAsync(payData);
-
-//        result.Success = true;
-//        result.PayData = payData;
-//        result.Message = "回调处理成功";
-
-//        return result;
-//    }
-//    catch (Exception ex)
-//    {
-//        _logger.LogError(ex, "处理支付回调失败");
-//        result.Success = false;
-//        result.ErrorMessage = ex.Message;
-//        return result;
-//    }
-//}
-
-///// <summary>
-///// 处理支付业务逻辑
-///// </summary>
-//private async Task ProcessPaymentAsync(PayCallbackData payData)
-//{
-//    try
-//    {
-//        var orderNo = payData.OutTradeNo;
-//        var transactionId = payData.TransactionId;
-//        var totalFee = payData.Amount?.Total ?? 0;
-
-//        _logger.LogInformation($"开始处理支付成功回调，订单号：{orderNo}，交易号：{transactionId}");
-
-//        // 查询订单
-//        var order = await _db.Queryable<WarrantyRecord>()
-//            .Where(o => o.OrderNo == orderNo && !o.IsDeleted)
-//            .FirstAsync()
-//            .ConfigureAwait(false);
-
-//        if (order == null)
-//        {
-//            _logger.LogWarning($"订单不存在：{orderNo}");
-//            return;
-//        }
-
-//        // 防止重复处理
-//        if (order.OrderStatus == WarrantyStatusEnum.Paid)
-//        {
-//            _logger.LogInformation($"订单已支付，忽略重复回调：{orderNo}");
-//            return;
-//        }
-
-//        // 验证金额是否一致
-//        var expectedAmount = (int)(order.Amount * 100);
-//        if (expectedAmount != totalFee)
-//        {
-//            _logger.LogError($"金额不一致：订单金额{expectedAmount}分，支付金额{totalFee}分，订单号：{orderNo}");
-//            return;
-//        }
-
-//        // 更新订单支付状态
-//        order.OrderStatus = WarrantyStatusEnum.Paid;
-//        order.TransactionId = transactionId;
-//        order.PayTime = DateTime.Now;
-//        order.UpdateTime = DateTime.Now;
-
-//        await _db.Updateable(order)
-//            .UpdateColumns(o => new { o.OrderStatus, o.TransactionId, o.PayTime, o.UpdateTime })
-//            .ExecuteCommandAsync()
-//            .ConfigureAwait(false);
-
-//        _logger.LogInformation($"订单支付成功，订单号：{orderNo}，交易号：{transactionId}");
-//    }
-//    catch (Exception ex)
-//    {
-//        _logger.LogError(ex, "处理支付业务逻辑失败");
-//        throw;
-//    }
-//}
-
-//#endregion
-
-//#region 退款回调
-
-///// <summary>
-///// 处理退款回调通知（V3）
-///// </summary>
-//public async Task<RefundCallbackResult> HandleRefundCallbackAsync(
-//    string requestBody,
-//    string wechatpaySignature,
-//    string wechatpayTimestamp,
-//    string wechatpayNonce,
-//    string wechatpaySerial)
-//{
-//    var result = new RefundCallbackResult();
-
-//    try
-//    {
-//        // 验证签名
-//        var isValid = VerifyCallbackSignature(
-//            requestBody,
-//            wechatpaySignature,
-//            wechatpayTimestamp,
-//            wechatpayNonce,
-//            wechatpaySerial
-//        );
-
-//        if (!isValid)
-//        {
-//            result.Success = false;
-//            result.ErrorMessage = "签名验证失败";
-//            return result;
-//        }
-
-//        // 解析回调通知
-//        var notification = JsonSerializer.Deserialize<RefundCallbackNotification>(requestBody, new JsonSerializerOptions
-//        {
-//            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-//        });
-
-//        if (notification == null)
-//        {
-//            result.Success = false;
-//            result.ErrorMessage = "解析退款回调通知失败";
-//            return result;
-//        }
-
-//        // 检查事件类型
-//        if (notification.EventType != "REFUND.SUCCESS" &&
-//            notification.EventType != "REFUND.ABNORMAL" &&
-//            notification.EventType != "REFUND.CLOSED")
-//        {
-//            result.Success = true;
-//            result.Message = $"忽略事件类型: {notification.EventType}";
-//            return result;
-//        }
-
-//        // 解密数据
-//        var refundData = DecryptRefundCallbackData(notification.Resource);
-
-//        if (refundData == null)
-//        {
-//            result.Success = false;
-//            result.ErrorMessage = "解密退款回调数据失败";
-//            return result;
-//        }
-
-//        // 业务处理
-//        await ProcessRefundAsync(refundData);
-
-//        result.Success = true;
-//        result.RefundData = refundData;
-//        result.Message = "退款回调处理成功";
-
-//        return result;
-//    }
-//    catch (Exception ex)
-//    {
-//        _logger.LogError(ex, "处理退款回调失败");
-//        result.Success = false;
-//        result.ErrorMessage = ex.Message;
-//        return result;
-//    }
-//}
-
-///// <summary>
-///// 解密退款回调数据（V3）
-///// </summary>
-//public RefundCallbackData DecryptRefundCallbackData(CallbackResource resource)
-//{
-//    try
-//    {
-//        var config = _appConfiguration.Value.WeChatPay;
-//        var apiV3Key = config.ApiV3Key;
-
-//        if (string.IsNullOrEmpty(apiV3Key))
-//            throw new Exception("API V3 密钥未配置");
-
-//        if (resource.Algorithm != "AEAD_AES_256_GCM")
-//            throw new Exception($"不支持的加密算法: {resource.Algorithm}");
-
-//        // 解密
-//        var plaintext = AesGcmDecrypt(
-//            apiV3Key,
-//            resource.AssociatedData,
-//            resource.Nonce,
-//            resource.Ciphertext
-//        );
-
-//        _logger.LogDebug($"退款回调解密后的数据: {plaintext}");
-
-//        // 解析 JSON
-//        var result = JsonSerializer.Deserialize<RefundCallbackData>(plaintext, new JsonSerializerOptions
-//        {
-//            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-//        });
-
-//        return result;
-//    }
-//    catch (Exception ex)
-//    {
-//        _logger.LogError(ex, "解密退款回调数据失败");
-//        throw;
-//    }
-//}
-
-///// <summary>
-///// 处理退款业务逻辑
-///// </summary>
-//private async Task ProcessRefundAsync(RefundCallbackData refundData)
-//{
-//    try
-//    {
-//        var orderNo = refundData.OutTradeNo;
-//        var refundNo = refundData.OutRefundNo;
-//        var refundId = refundData.RefundId;
-//        var refundStatus = refundData.RefundStatus;
-//        var refundAmount = refundData.Amount?.Refund ?? 0;
-
-//        _logger.LogInformation($"开始处理退款回调，订单号：{orderNo}，退款单号：{refundNo}，状态：{refundStatus}");
-
-//        // 查询订单
-//        var order = await _db.Queryable<WarrantyRecord>()
-//            .Where(o => o.OrderNo == orderNo && !o.IsDeleted)
-//            .FirstAsync()
-//            .ConfigureAwait(false);
-
-//        if (order == null)
-//        {
-//            _logger.LogWarning($"订单不存在：{orderNo}");
-//            return;
-//        }
-
-//        // 防止重复处理
-//        if (order.OrderStatus == WarrantyStatusEnum.Refunded)
-//        {
-//            _logger.LogInformation($"订单已退款，忽略重复回调：{orderNo}");
-//            return;
-//        }
-
-//        switch (refundStatus)
-//        {
-//            case "SUCCESS":
-//                // 退款成功
-//                order.OrderStatus = WarrantyStatusEnum.Refunded;
-//                order.RefundNo = refundNo;
-//                order.RefundId = refundId;
-//                order.AuditRemark = "退款成功";
-//                order.UpdateTime = DateTime.Now;
-
-//                await _db.Updateable(order)
-//                    .UpdateColumns(o => new
-//                    {
-//                        o.OrderStatus,
-//                        o.RefundNo,
-//                        o.RefundId,
-//                        o.AuditRemark,
-//                        o.UpdateTime
-//                    })
-//                    .ExecuteCommandAsync()
-//                    .ConfigureAwait(false);
-
-//                _logger.LogInformation($"退款成功，订单号：{orderNo}，退款单号：{refundNo}");
-//                break;
-
-//            case "ABNORMAL":
-//                // 退款异常
-//                order.OrderStatus = WarrantyStatusEnum.RefundFailed;
-//                order.AuditRemark = $"退款异常，微信退款单号：{refundId}";
-//                order.UpdateTime = DateTime.Now;
-
-//                await _db.Updateable(order)
-//                    .UpdateColumns(o => new { o.OrderStatus, o.AuditRemark, o.UpdateTime })
-//                    .ExecuteCommandAsync()
-//                    .ConfigureAwait(false);
-
-//                _logger.LogWarning($"退款异常，订单号：{orderNo}，退款单号：{refundNo}");
-//                break;
-
-//            case "CLOSED":
-//                // 退款关闭
-//                order.OrderStatus = WarrantyStatusEnum.RefundFailed;
-//                order.AuditRemark = $"退款关闭，微信退款单号：{refundId}";
-//                order.UpdateTime = DateTime.Now;
-
-//                await _db.Updateable(order)
-//                    .UpdateColumns(o => new { o.OrderStatus, o.AuditRemark, o.UpdateTime })
-//                    .ExecuteCommandAsync()
-//                    .ConfigureAwait(false);
-
-//                _logger.LogWarning($"退款关闭，订单号：{orderNo}，退款单号：{refundNo}");
-//                break;
-
-//            default:
-//                _logger.LogWarning($"未知退款状态：{refundStatus}，订单号：{orderNo}");
-//                break;
-//        }
-//    }
-//    catch (Exception ex)
-//    {
-//        _logger.LogError(ex, "处理退款业务逻辑失败");
-//        throw;
-//    }
-//}
-
-//#endregion
-
-//    }
-//}

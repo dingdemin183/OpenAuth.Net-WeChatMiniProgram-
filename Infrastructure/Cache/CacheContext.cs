@@ -49,8 +49,10 @@
 //        }
 //    }
 //}
-using System;
+using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
+using System;
+using System.Linq;
 using System.Text.Json;
 
 namespace Infrastructure.Cache
@@ -59,11 +61,14 @@ namespace Infrastructure.Cache
     {
         private readonly IDatabase _redisDb;
         private readonly ConnectionMultiplexer _redis;
+        private readonly ILogger<CacheContext> _logger;
 
-        public CacheContext(ConnectionMultiplexer redis)
+        public CacheContext(ConnectionMultiplexer redis, ILogger<CacheContext> logger)
         {
             _redis = redis;
             _redisDb = redis.GetDatabase();
+            _logger = logger;
+            
         }
 
         public override T Get<T>(string key)

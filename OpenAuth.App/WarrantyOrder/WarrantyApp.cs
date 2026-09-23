@@ -55,21 +55,34 @@ namespace OpenAuth.App.Warranty
         /// </summary>
         public async Task<TableResp<WarrantyCardResp>> QueryWarrantyCardsAsync(QueryWarrantyCardsReq req)
         {
+            if (req == null)
+                throw new CommonException("请求参数不能为空");
+
             var query = _db.Queryable<WarrantyRecord>()
-                .Where(r => !r.IsDeleted);
+                .Where(r => r.IsDeleted == false);
 
             // 订单状态筛选
             if (req.OrderStatus.HasValue)
             {
-                var statusEnum = (WarrantyStatusEnum)req.OrderStatus.Value;
+                var statusValue = req.OrderStatus.Value;
+                if (!Enum.IsDefined(typeof(WarrantyStatusEnum), statusValue))
+                    throw new CommonException("非法的订单状态值");
+
+                var statusEnum = (WarrantyStatusEnum)statusValue;
                 query = query.Where(r => r.OrderStatus == statusEnum);
             }
 
-            // 关键词查询
+            // 关键词查询：字段值包含用户输入的关键词（修复原来方向写反的问题）
             if (!string.IsNullOrWhiteSpace(req.Key))
             {
-                query = query.Where(r => req.Key.Contains(r.UserId)||req.Key.Contains(r.UserName)
-                                        ||req.Key.Contains(r.UserName)||req.Key.Contains(r.OrderNo));
+                var key = req.Key.Trim();
+                query = query.Where(r => r.UserId.Contains(key)
+                                         || r.UserName.Contains(key)
+                                         || r.Phone.Contains(key));
+            }
+            if (!string.IsNullOrWhiteSpace(req.OrderNo))
+            {
+                query = query.Where(r => r.OrderNo.Contains(req.OrderNo.Trim()));
             }
 
             // 创建时间范围筛选
@@ -126,14 +139,17 @@ namespace OpenAuth.App.Warranty
             var user = _auth.GetCurrentSession();
             if (string.IsNullOrEmpty(user?.UserId))
                 throw new CommonException("登录信息错误，请重新登录");
-
             // 获取用户openid
-            var externalAuth = await _db.Queryable<SysUserExternalAuth>()
-                .FirstAsync(x => x.Id == user.UserId)
-                .ConfigureAwait(false);
-
-            if (externalAuth == null || string.IsNullOrEmpty(externalAuth.OpenId))
+            if(string.IsNullOrEmpty(user?.Account))
+            {
                 throw new CommonException("未获取到微信登录信息，请重新登录");
+            }
+            //var externalAuth = await _db.Queryable<SysUserExternalAuth>()
+            //    .FirstAsync(x => x.Id == user.UserId)
+            //    .ConfigureAwait(false);
+
+            //if (externalAuth == null || string.IsNullOrEmpty(externalAuth.OpenId))
+            //    throw new CommonException("未获取到微信登录信息，请重新登录");
 
             // 校验购机时间（购机1年内才能购买）
             var now = DateTime.Now;
@@ -153,26 +169,30 @@ namespace OpenAuth.App.Warranty
                 // 二次支付：更新已有订单 
                 record = await UpdateOrderForRepayAsync(req, user.UserId);
             }
+
+            // 微信下单属于外部HTTP调用，不能包进数据库事务
+            var payResult = await _wxPayService.UnifiedOrderAsync(req, user.Account, record.OrderNo);
+
+            record.UpdateTime = DateTime.Now;
+
+            // 只把数据库写操作包在事务里
+            await _db.Ado.BeginTranAsync();
             try
             {
-                var payResult = await _wxPayService.UnifiedOrderAsync(req,user.Account,record.OrderNo);
-
-                record.UpdateTime = now;
-
                 await _db.Updateable(record)
                     .UpdateColumns(x => new { x.UpdateTime })
                     .ExecuteCommandAsync()
                     .ConfigureAwait(false);
 
-                return payResult;
+                await _db.Ado.CommitTranAsync();
             }
-            catch (Exception ex) 
+            catch
             {
-                _logger.LogError(ex, $"创建支付订单失败：订单{record.OrderNo}");
-                throw new CommonException("创建支付订单失败，请重试");
+                await _db.Ado.RollbackTranAsync();
+                throw;
             }
 
-           
+            return payResult;
         }
 
         /// <summary>
@@ -185,32 +205,57 @@ namespace OpenAuth.App.Warranty
         /// <exception cref="CommonException"></exception>
         private async Task<WarrantyRecord> CreateNewOrderAsync(CreateWarrantyPayOrderReq req, string userId)
         {
-            // 生成订单号
-            var orderNo = await GenerateOrderNoAsync();
-
-            var record = new WarrantyRecord
+            try
             {
-                Id = Guid.NewGuid().ToString("N"),
-                OrderNo = orderNo,
-                UserId = userId,
-                UserName = req.UserName,
-                Phone = req.Phone,
-                ProductBrand = req.ProductBrand,
-                ProductType = req.ProductType,
-                ProductModel = req.ProductModel,
-                PurchaseDate = req.PurchaseDate,
-                EnergyImage = req.EnergyImage,
-                TradeImage = req.TradeImage,
-                WarrantyYears = req.WarrantyYears,
-                Amount = req.Amount,
-                OrderStatus = 0,
-                CreateTime = DateTime.Now,
-                IsDeleted = false
-            };
+                // 生成订单号
+                var orderNo = GenerateOrderNoInternal();
 
-            await _db.Insertable(record).ExecuteCommandAsync().ConfigureAwait(false);
-            return record;
+                var record = new WarrantyRecord
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    OrderNo = orderNo,
+                    UserId = userId,
+                    UserName = req.UserName,
+                    Phone = req.Phone,
+                    ProductBrand = req.ProductBrand,
+                    ProductType = req.ProductType,
+                    ProductModel = req.ProductModel,
+                    PurchaseDate = req.PurchaseDate,
+                    EnergyImage = req.EnergyImage,
+                    TradeImage = req.TradeImage,
+                    WarrantyYears = req.WarrantyYears,
+                    Amount = req.Amount,
+                    OrderStatus = 0,
+                    CreateTime = DateTime.Now,
+                    IsDeleted = false
+                };
 
+                // 插入写操作包在事务里
+                await _db.Ado.BeginTranAsync();
+                try
+                {
+                    await _db.Insertable(record)
+                        .ExecuteCommandAsync()
+                        .ConfigureAwait(false);
+
+                    await _db.Ado.CommitTranAsync();
+                }
+                catch
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    throw;
+                }
+                return record;
+            }
+            catch (CommonException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "创建延保订单失败");
+                throw new CommonException("创建延保订单失败,请重试");
+            }
         }
 
         /// <summary>
@@ -224,7 +269,7 @@ namespace OpenAuth.App.Warranty
         {
             // 查询订单
             var record = await _db.Queryable<WarrantyRecord>()
-                .Where(r => r.OrderNo == req.OrderNo && r.UserId == userId && !r.IsDeleted)
+                .Where(r => r.OrderNo == req.OrderNo && r.UserId == userId && r.IsDeleted == false)
                 .FirstAsync()
                 .ConfigureAwait(false);
 
@@ -237,7 +282,7 @@ namespace OpenAuth.App.Warranty
                 throw new CommonException($"当前订单状态非“待支付”，无法重新支付");
             }
 
-            // 更新订单信息
+            // 更新订单信息（查询已在事务外完成，这里只做写操作）
             record.UserName = req.UserName;
             record.Phone = req.Phone;
             record.ProductBrand = req.ProductBrand;
@@ -248,27 +293,38 @@ namespace OpenAuth.App.Warranty
             record.TradeImage = req.TradeImage;
             record.WarrantyYears = req.WarrantyYears;
             record.Amount = req.Amount;
-            record.OrderStatus = 0;  // 待支付状态
+            record.OrderStatus = WarrantyStatusEnum.Pending;  // 待支付状态
             record.UpdateTime = DateTime.Now;
 
-            await _db.Updateable(record)
-                .UpdateColumns(r => new
-                {
-                    r.UserName,
-                    r.Phone,
-                    r.ProductBrand,
-                    r.ProductType,
-                    r.ProductModel,
-                    r.PurchaseDate,
-                    r.EnergyImage,
-                    r.TradeImage,
-                    r.WarrantyYears,
-                    r.Amount,
-                    r.OrderStatus,
-                    r.UpdateTime
-                })
-                .ExecuteCommandAsync()
-                .ConfigureAwait(false);
+            await _db.Ado.BeginTranAsync();
+            try
+            {
+                await _db.Updateable(record)
+                    .UpdateColumns(r => new
+                    {
+                        r.UserName,
+                        r.Phone,
+                        r.ProductBrand,
+                        r.ProductType,
+                        r.ProductModel,
+                        r.PurchaseDate,
+                        r.EnergyImage,
+                        r.TradeImage,
+                        r.WarrantyYears,
+                        r.Amount,
+                        r.OrderStatus,
+                        r.UpdateTime
+                    })
+                    .ExecuteCommandAsync()
+                    .ConfigureAwait(false);
+
+                await _db.Ado.CommitTranAsync();
+            }
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
+            }
 
             return record;
 
@@ -295,7 +351,7 @@ namespace OpenAuth.App.Warranty
 
             // 查询订单
             var order = await _db.Queryable<WarrantyRecord>()
-                .Where(o => o.OrderNo == req.OrderNo && !o.IsDeleted)
+                .Where(o => o.OrderNo == req.OrderNo && o.IsDeleted == false)
                 .FirstAsync()
                 .ConfigureAwait(false);
 
@@ -324,10 +380,22 @@ namespace OpenAuth.App.Warranty
                 order.EndDate = req.EndTime;
                 order.UpdateTime = DateTime.Now;
 
-                await _db.Updateable(order)
-                    .UpdateColumns(o => new { o.OrderStatus, o.StartDate, o.EndDate, o.UpdateTime })
-                    .ExecuteCommandAsync()
-                    .ConfigureAwait(false);
+                // 查询在事务外，只把审核写操作包在事务里
+                await _db.Ado.BeginTranAsync();
+                try
+                {
+                    await _db.Updateable(order)
+                        .UpdateColumns(o => new { o.OrderStatus, o.StartDate, o.EndDate, o.UpdateTime })
+                        .ExecuteCommandAsync()
+                        .ConfigureAwait(false);
+
+                    await _db.Ado.CommitTranAsync();
+                }
+                catch
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    throw;
+                }
 
                 result.Code = 200;
                 result.Message = "审核通过";
@@ -336,22 +404,31 @@ namespace OpenAuth.App.Warranty
             else
             {
                 // 审核拒绝 - 使用新版 V3 退款
-                // 先更新状态为"已退款"
+                // 先更新状态为"已退款"并记录拒绝原因（写操作包事务）
                 order.OrderStatus = WarrantyStatusEnum.Refunded;
                 order.AuditRemark = req.Remark;
                 order.UpdateTime = DateTime.Now;
 
-                await _db.Updateable(order)
-                    .UpdateColumns(o => new { o.OrderStatus, o.AuditRemark, o.UpdateTime })
-                    .ExecuteCommandAsync()
-                    .ConfigureAwait(false);
+                await _db.Ado.BeginTranAsync();
+                try
+                {
+                    await _db.Updateable(order)
+                        .UpdateColumns(o => new { o.OrderStatus, o.AuditRemark, o.UpdateTime })
+                        .ExecuteCommandAsync()
+                        .ConfigureAwait(false);
+
+                    await _db.Ado.CommitTranAsync();
+                }
+                catch
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    throw;
+                }
 
                 try
                 {
                     // 生成商户退款单号
                     var refundNo = _wxPayRefundService.GenerateRefundNo(order.OrderNo);
-
-                    var config = _appConfiguration.Value.WeChatPay;
 
                     var refundReq = new RefundReq
                     {
@@ -365,21 +442,34 @@ namespace OpenAuth.App.Warranty
                             Currency = "CNY"
                         }
                     };
-                    //调用新版 V3 退款接口
-                    var refundResult = await _wxPayRefundService.CreateRefundAsync(refundReq);
+
+                    // 调用新版 V3 退款接口（外部HTTP调用，不能包进数据库事务）
+                    await _wxPayRefundService.CreateRefundAsync(refundReq);
 
                     // 退款已发起，等待微信回调
-                    _logger.LogInformation($"退款已发起：订单{order.OrderNo}，退款单号{refundNo}，等待回调");
+                    _logger.LogInformation("退款已发起：订单{OrderNo}，退款单号{RefundNo}，等待回调",
+                        order.OrderNo, refundNo);
 
-                    // 更新退款单号到订单
+                    // 更新退款单号到订单（写操作包事务）
                     order.RefundNo = refundNo;
-                    order.OrderStatus = WarrantyStatusEnum.Refunded;  // 退款中状态
+                    order.OrderStatus = WarrantyStatusEnum.Refunded;  // 退款中状态，等待微信回调确认
                     order.UpdateTime = DateTime.Now;
 
-                    await _db.Updateable(order)
-                        .UpdateColumns(o => new { o.RefundNo, o.OrderStatus, o.UpdateTime })
-                        .ExecuteCommandAsync()
-                        .ConfigureAwait(false);
+                    await _db.Ado.BeginTranAsync();
+                    try
+                    {
+                        await _db.Updateable(order)
+                            .UpdateColumns(o => new { o.RefundNo, o.OrderStatus, o.UpdateTime })
+                            .ExecuteCommandAsync()
+                            .ConfigureAwait(false);
+
+                        await _db.Ado.CommitTranAsync();
+                    }
+                    catch
+                    {
+                        await _db.Ado.RollbackTranAsync();
+                        throw;
+                    }
 
                     result.Code = 200;
                     result.Message = "审核拒绝，退款已发起";
@@ -387,17 +477,35 @@ namespace OpenAuth.App.Warranty
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, $"发起退款失败：订单{order.OrderNo}");
+                    _logger.LogError(ex, "发起退款失败：订单{OrderNo}", order.OrderNo);
 
-                    // 退款失败，更新状态
-                    order.OrderStatus = WarrantyStatusEnum.RefundFailed;
-                    order.AuditRemark = $"退款失败：{ex.Message}";
-                    order.UpdateTime = DateTime.Now;
+                    // 退款失败，回写失败状态；若回写也失败，只记录日志，避免掩盖原始退款异常
+                    try
+                    {
+                        order.OrderStatus = WarrantyStatusEnum.RefundFailed;
+                        order.AuditRemark = $"退款失败：{ex.Message}";
+                        order.UpdateTime = DateTime.Now;
 
-                    await _db.Updateable(order)
-                        .UpdateColumns(o => new { o.OrderStatus, o.AuditRemark, o.UpdateTime })
-                        .ExecuteCommandAsync()
-                        .ConfigureAwait(false);
+                        await _db.Ado.BeginTranAsync();
+                        try
+                        {
+                            await _db.Updateable(order)
+                                .UpdateColumns(o => new { o.OrderStatus, o.AuditRemark, o.UpdateTime })
+                                .ExecuteCommandAsync()
+                                .ConfigureAwait(false);
+
+                            await _db.Ado.CommitTranAsync();
+                        }
+                        catch
+                        {
+                            await _db.Ado.RollbackTranAsync();
+                            throw;
+                        }
+                    }
+                    catch (Exception updateEx)
+                    {
+                        _logger.LogError(updateEx, "退款失败后回写订单状态也失败：订单{OrderNo}", order.OrderNo);
+                    }
 
                     throw new CommonException($"退款发起失败：{ex.Message}");
                 }
@@ -406,7 +514,170 @@ namespace OpenAuth.App.Warranty
             return result;
         }
 
+        // OpenAuth.App/Warranty/WarrantyApp.cs 中添加
 
+        /// <summary>
+        /// 查询订单状态（先查本地，若本地为待支付则主动查询微信并同步）
+        /// </summary>
+        /// <param name="orderNo">商户订单号</param>
+        /// <returns></returns>
+        public async Task<WarrantyOrderQueryResp> QueryOrderStatusFromWechatAsync(string orderNo)
+        {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                throw new CommonException("订单号不能为空");
+
+            // 查本地订单
+            var order = await _db.Queryable<WarrantyRecord>()
+                .Where(o => o.OrderNo == orderNo && o.IsDeleted == false)
+                .FirstAsync()
+                .ConfigureAwait(false);
+
+            if (order == null)
+                throw new CommonException("订单不存在");
+
+            // 如果本地已经是终态（已支付待审核/生效中/已过期/已退款/退款失败），直接返回本地数据
+            if (order.OrderStatus != WarrantyStatusEnum.Pending)
+            {
+                return BuildQueryResp(order, null);
+            }
+
+            // 本地为"待支付"，主动去微信查询
+            try
+            {
+                var wxResp = await _wxPayService.QueryTransactionByOutTradeNoAsync(orderNo);
+
+                // 微信侧订单不存在，直接返回本地状态
+                if (wxResp == null)
+                {
+                    return BuildQueryResp(order, null);
+                }
+
+                // 据微信返回的交易状态同步本地订单
+                bool needUpdate = false;
+
+                switch (wxResp.TradeState)
+                {
+                    case "SUCCESS":
+                        // 支付成功，但回调可能丢失，这里主动同步
+                        order.OrderStatus = WarrantyStatusEnum.Paid;
+                        order.TransactionId = wxResp.TransactionId;
+
+                        // 
+                        if (wxResp.SuccessTime.HasValue)
+                        {
+                            order.PayTime = wxResp.SuccessTime.Value.LocalDateTime;
+                        }
+                        else
+                        {
+                            order.PayTime = DateTime.Now;
+                        }
+                        needUpdate = true;
+                        _logger.LogInformation("主动同步微信支付成功：订单{OrderNo}", orderNo);
+                        break;
+
+                    case "REFUND":
+                        order.OrderStatus = WarrantyStatusEnum.Refunded;
+                        needUpdate = true;
+                        break;
+
+                    case "CLOSED":
+                        // 订单已关闭，可视为失效（这里按已过期处理，或你自定义状态）
+                        order.OrderStatus = WarrantyStatusEnum.Expired;
+                        needUpdate = true;
+                        break;
+
+                    case "NOTPAY":
+                    case "USERPAYING":
+                        // 未支付 / 支付中，保持待支付状态
+                        break;
+
+                    case "PAYERROR":
+                    case "REVOKED":
+                        // 支付失败/已撤销，保持待支付，让用户重新支付
+                        break;
+
+                    default:
+                        _logger.LogWarning("未知微信交易状态：{TradeState}，订单{OrderNo}",
+                            wxResp.TradeState, orderNo);
+                        break;
+                }
+
+                if (needUpdate)
+                {
+                    order.UpdateTime = DateTime.Now;
+                    // 状态同步写操作包事务
+                    await _db.Ado.BeginTranAsync();
+                    try
+                    {
+                        await _db.Updateable(order)
+                            .UpdateColumns(o => new
+                            {
+                                o.OrderStatus,
+                                o.TransactionId,
+                                o.PayTime,
+                                o.UpdateTime
+                            })
+                            .ExecuteCommandAsync()
+                            .ConfigureAwait(false);
+
+                        await _db.Ado.CommitTranAsync();
+                    }
+                    catch
+                    {
+                        await _db.Ado.RollbackTranAsync();
+                        throw;
+                    }
+                }
+
+                return BuildQueryResp(order, wxResp);
+            }
+            catch (Exception ex)
+            {
+                // 微信查询失败不影响本地状态返回
+                _logger.LogError(ex, "查询微信订单异常：订单{OrderNo}", orderNo);
+                return BuildQueryResp(order, null);
+            }
+        }
+
+        /// <summary>
+        /// 构建订单查询响应
+        /// </summary>
+        private WarrantyOrderQueryResp BuildQueryResp(
+            WarrantyRecord order,
+            SKIT.FlurlHttpClient.Wechat.TenpayV3.Models.GetPayTransactionByOutTradeNumberResponse wxResp)
+        {
+            var now = DateTime.Now;
+
+            // 计算显示状态（与 MapToCardResp 保持一致）
+            var displayStatus = order.OrderStatus;
+            var displayStatusName = EnumExtensions.GetText(order.OrderStatus);
+
+            if (order.EndDate.HasValue && order.EndDate.Value < now &&
+                order.OrderStatus == WarrantyStatusEnum.Active)
+            {
+                displayStatus = WarrantyStatusEnum.Expired;
+                displayStatusName = "已过期";
+            }
+
+            if (order.OrderStatus == WarrantyStatusEnum.RefundFailed)
+            {
+                displayStatus = WarrantyStatusEnum.Paid;
+                displayStatusName = "已支付";
+            }
+
+            return new WarrantyOrderQueryResp
+            {
+                Id = order.Id,
+                OrderNo = order.OrderNo,
+                TransactionId = order.TransactionId,
+                CardStatus = (int)displayStatus,
+                CardStatusName = displayStatusName,
+                TradeState = wxResp?.TradeState,
+                TradeStateDesc = wxResp?.TradeStateDescription,
+                PaidAmount = order.Amount,
+                PayTime = order.PayTime
+            };
+        }
 
         /// <summary>
         /// 查询订单支付状态（小程序端轮询）
@@ -419,32 +690,23 @@ namespace OpenAuth.App.Warranty
             if (string.IsNullOrWhiteSpace(orderNo))
                 throw new CommonException("订单号不能为空");
 
-            try
+            var order = await _db.Queryable<WarrantyRecord>()
+                .Where(o => o.OrderNo == orderNo && o.IsDeleted == false)
+                .FirstAsync()
+                .ConfigureAwait(false);
+
+            if (order == null)
+                throw new CommonException("订单不存在");
+
+            return new WarrantyCardResp
             {
-                var order = await _db.Queryable<WarrantyRecord>()
-               .Where(o => o.OrderNo == orderNo && !o.IsDeleted)
-               .FirstAsync()
-               .ConfigureAwait(false);
-
-                if (order == null)
-                    throw new CommonException("订单不存在");
-
-                return new WarrantyCardResp
-                {
-                    Id = order.Id,
-                    OrderNo = order.OrderNo,
-                    CardStatus = (int)order.OrderStatus,
-                    CardStatusName = EnumExtensions.GetText(order.OrderStatus),
-                    TransactionId = order.TransactionId,
-                    PaidAmount = order.Amount
-                };
-            }
-            catch (Exception ex)
-            {
-                throw new CommonException("查询订单状态失败");
-            }   
-
-
+                Id = order.Id,
+                OrderNo = order.OrderNo,
+                CardStatus = (int)order.OrderStatus,
+                CardStatusName = EnumExtensions.GetText(order.OrderStatus),
+                TransactionId = order.TransactionId,
+                PaidAmount = order.Amount
+            };
         }
 
         #endregion
@@ -463,7 +725,7 @@ namespace OpenAuth.App.Warranty
             if (string.IsNullOrWhiteSpace(orderNo))
                 throw new CommonException("延保卡订单号不能为空");
             var card = await _db.Queryable<WarrantyRecord>()
-              .Where(c => c.OrderNo == orderNo && !c.IsDeleted)
+              .Where(c => c.OrderNo == orderNo && c.IsDeleted == false)
               .FirstAsync()
               .ConfigureAwait(false);
 
@@ -487,7 +749,7 @@ namespace OpenAuth.App.Warranty
             }
 
             var cards = await _db.Queryable<WarrantyRecord>()
-                                     .Where(r => r.UserId == userId && !r.IsDeleted)
+                                     .Where(r => r.UserId == userId && r.IsDeleted == false)
                                      .ToListAsync()
                                      .ConfigureAwait(false);
 
@@ -507,51 +769,19 @@ namespace OpenAuth.App.Warranty
 
         #region 编号生成
 
+      
+
         /// <summary>
         /// 生成订单号
         /// </summary>
-        private async Task<string> GenerateOrderNoAsync()
-        {
-            var maxRetries = 3;
-            for (int i = 0; i < maxRetries; i++)
-            {
-                var orderNo = GenerateOrderNoInternal();
-
-                // 检查订单号是否已存在
-                var exists = await _db.Queryable<WarrantyRecord>()
-                    .AnyAsync(x => x.OrderNo == orderNo);
-
-                if (!exists)
-                {
-                    return orderNo;
-                }
-                await Task.Delay(1);
-            }
-
-            // 重试失败，使用带时间戳更精确的版本
-            return GenerateOrderNoWithTicks();
-        }
-
-        /// <summary>
-        /// 生成订单号：WB + 日期(8位) + 6位随机数
-        /// </summary>
+        /// <returns></returns>
         private string GenerateOrderNoInternal()
         {
             var datePart = DateTime.Now.ToString("yyyyMMdd");
-            var random = new Random().Next(100000, 999999).ToString();
-            return $"WB{datePart}{random}";
+            var suffix = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+            return $"DSYB{datePart}{suffix}"; 
         }
 
-        /// <summary>
-        /// 生成订单号（带毫秒级时间戳，用于重试失败时）
-        /// </summary>
-        private string GenerateOrderNoWithTicks()
-        {
-            var datePart = DateTime.Now.ToString("yyyyMMdd");
-            var ticks = DateTime.Now.Ticks.ToString().Substring(12, 4); // 取后4位
-            var random = new Random().Next(10, 99).ToString();
-            return $"WB{datePart}{ticks}{random}";
-        }
 
         #endregion
 
@@ -566,7 +796,7 @@ namespace OpenAuth.App.Warranty
         private WarrantyCardResp MapToCardResp(WarrantyRecord card)
         {
             var now = DateTime.Now;
-            var isExpired = card.EndDate < now;
+            var isExpired = card.EndDate.HasValue && card.EndDate.Value < now;
 
             //  动态计算状态名称
             var displayStatus = card.OrderStatus;
@@ -584,7 +814,17 @@ namespace OpenAuth.App.Warranty
                 displayStatus = WarrantyStatusEnum.Paid;
                 displayStatusName = "已支付";
             }
-
+            string remainingdays = "";
+            if (displayStatus == WarrantyStatusEnum.Expired)
+            {
+                remainingdays = "-";
+            }
+            else
+            {
+                remainingdays = card.EndDate.HasValue
+                    ? ((int)(card.EndDate.Value - now).TotalDays).ToString()
+                    : "";
+            }
             return new WarrantyCardResp
             {
                 Id = card.Id,
@@ -599,7 +839,7 @@ namespace OpenAuth.App.Warranty
                 PaidAmount = card.Amount,
                 PayTime = card.PayTime,
                 EndDate = card.EndDate,
-                RemainingDays = card.EndDate.HasValue ? (card.EndDate.Value - now).Days : 0,
+                RemainingDays = remainingdays,
                 CardStatus =(int) displayStatus,          // 返回修正后的状态
                 CardStatusName = displayStatusName,  // 返回修正后的状态名
                 OrderNo = card.OrderNo,

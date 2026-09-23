@@ -44,7 +44,7 @@ namespace OpenAuth.WebApi.Controllers
                 {
                     Code = 500,
                     Message = ex.Message,
-                    Data = null,
+                    Data = new List<ProductAdminResp>(),
                     Count = 0,
                     Page = req?.page ?? 1,
                     Limit = req?.limit ?? 20
@@ -57,6 +57,7 @@ namespace OpenAuth.WebApi.Controllers
         /// </summary>
         /// <param name="req"></param>
         /// <returns></returns>
+   
         [HttpPost]
         public async Task<Response<string>> Add([FromBody] AddProductReq req)
         {

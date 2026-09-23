@@ -24,6 +24,8 @@ using System.Linq;
 using Infrastructure.Helpers;
 using Microsoft.Extensions.Logging;
 using StackExchange.Profiling;
+using System.Reflection;
+using NUnit.Framework.Internal.Execution;
 
 namespace OpenAuth.WebApi.Controllers
 {
@@ -339,7 +341,8 @@ namespace OpenAuth.WebApi.Controllers
 
             return result;
         }
-        
+      
+
         /// <summary>
         /// 登录接口
         /// </summary>
@@ -349,6 +352,8 @@ namespace OpenAuth.WebApi.Controllers
         [AllowAnonymous]
         public LoginResult Login([FromBody] PassportLoginRequest request)
         {
+            
+
             var result = new LoginResult();
             try
             { 

@@ -21,7 +21,7 @@ namespace OpenAuth.App.ProductManager
         private readonly ISqlSugarClient _db;
         private readonly WxSecurityService _securityService;
 
-        public ProductApp(ISqlSugarClient db ,IAuth auth,WxSecurityService wxSecurityService ) : base(db,auth)
+        public ProductApp(ISqlSugarClient db, IAuth auth, WxSecurityService wxSecurityService) : base(db, auth)
         {
             _db = db;
             _securityService = wxSecurityService;
@@ -72,10 +72,21 @@ namespace OpenAuth.App.ProductManager
                 IsDeleted = false
             };
 
-            await _db.Insertable(product)
-                .ExecuteCommandAsync()
-                .ConfigureAwait(false);
+            // 写操作包在事务里
+            await _db.Ado.BeginTranAsync();
+            try
+            {
+                await _db.Insertable(product)
+                    .ExecuteCommandAsync()
+                    .ConfigureAwait(false);
 
+                await _db.Ado.CommitTranAsync();
+            }
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
+            }
             return product.Id;
         }
 
@@ -101,16 +112,16 @@ namespace OpenAuth.App.ProductManager
             }
             if (string.IsNullOrEmpty(req.TaobaoLink))
             {
-                throw new Exception("商品淘宝链接不能为空");
+                throw new Exception("商品链接不能为空");
             }
 
             if (req.Price < 0)
             {
                 throw new Exception("商品价格错误");
             }
-            // 编辑
+            // 查询在事务外
             var product = await _db.Queryable<Product>()
-                             .Where(u => u.Id == req.Id && !u.IsDeleted)
+                             .Where(u => u.Id == req.Id && u.IsDeleted == false)
                              .FirstAsync()
                              .ConfigureAwait(false);
 
@@ -124,14 +135,26 @@ namespace OpenAuth.App.ProductManager
             product.Status = req.Status;
             product.UpdateTime = DateTime.Now;
 
-            await _db.Updateable(product)
-                     .UpdateColumns(x => new { x.Name, x.Price, x.ImageUrl, x.Status, x.UpdateTime, x.TaobaoLink })
-                     .ExecuteCommandAsync()
-                     .ConfigureAwait(false);
+            // 只把更新写操作包在事务里
+            await _db.Ado.BeginTranAsync();
+            try
+            {
+                await _db.Updateable(product)
+                         .UpdateColumns(x => new { x.Name, x.Price, x.ImageUrl, x.Status, x.UpdateTime, x.TaobaoLink })
+                         .ExecuteCommandAsync()
+                         .ConfigureAwait(false);
+
+                await _db.Ado.CommitTranAsync();
+            }
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
+            }
             return product.Id;
         }
 
-       
+
 
 
         /// <summary>
@@ -146,9 +169,9 @@ namespace OpenAuth.App.ProductManager
             if (req.Ids == null || req.Ids.Length == 0)
                 throw new CommonException("商品Id不能为空");
 
-            // 批量查询
+            // 批量查询在事务外
             var products = await _db.Queryable<Product>()
-                                    .Where(u => req.Ids.Contains(u.Id) && !u.IsDeleted)
+                                    .Where(u => req.Ids.Contains(u.Id) && u.IsDeleted == false)
                                     .ToListAsync()
                                     .ConfigureAwait(false);
 
@@ -162,11 +185,23 @@ namespace OpenAuth.App.ProductManager
                 product.IsDeleted = true;
                 product.UpdateTime = updateTime;
             }
-            
-            await _db.Updateable(products)
-                     .UpdateColumns(p => new { p.IsDeleted, p.UpdateTime })
-                     .ExecuteCommandAsync()
-                     .ConfigureAwait(false);
+
+            // 只把更新写操作包在事务里
+            await _db.Ado.BeginTranAsync();
+            try
+            {
+                await _db.Updateable(products)
+                         .UpdateColumns(p => new { p.IsDeleted, p.UpdateTime })
+                         .ExecuteCommandAsync()
+                         .ConfigureAwait(false);
+
+                await _db.Ado.CommitTranAsync();
+            }
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
+            }
         }
 
         /// <summary>
@@ -174,32 +209,37 @@ namespace OpenAuth.App.ProductManager
         /// </summary>
         public async Task OffShelf(string id)
         {
-            if(string.IsNullOrEmpty(id))
+            if (string.IsNullOrEmpty(id))
             {
                 throw new Exception("商品Id不能为空");
             }
+            // 查询在事务外
+            var product = await _db.Queryable<Product>()
+                                      .Where(u => u.Id == id && u.IsDeleted == false)
+                                      .FirstAsync()
+                                      .ConfigureAwait(false);
+            if (product == null)
+                throw new Exception("商品不存在");
+
+            product.Status = 0;
+            product.UpdateTime = DateTime.Now;
+
+            // 只把更新写操作包在事务里
+            await _db.Ado.BeginTranAsync();
             try
             {
-                var product = await _db.Queryable<Product>()
-                                       .Where(u => u.Id == id && !u.IsDeleted)
-                                       .FirstAsync()
-                                       .ConfigureAwait(false);
-                if (product == null)
-                    throw new Exception("商品不存在");
-
-                product.Status = 0;
-                product.UpdateTime = DateTime.Now;
-                await  _db.Updateable(product)
+                await _db.Updateable(product)
                           .UpdateColumns(p => new { p.Status, p.UpdateTime })
                           .ExecuteCommandAsync()
                           .ConfigureAwait(false);
-         
-            }
-            catch (Exception ex)
-            {
-                throw new Exception("下架商品失败：" + ex.Message);
-            }
 
+                await _db.Ado.CommitTranAsync();
+            }
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
+            }
         }
 
         /// <summary>
@@ -214,9 +254,10 @@ namespace OpenAuth.App.ProductManager
             {
                 throw new Exception("商品Id不能为空");
             }
-          
+
+            // 查询在事务外
             var product = await _db.Queryable<Product>()
-                                .Where(u => u.Id == id && !u.IsDeleted)
+                                .Where(u => u.Id == id && u.IsDeleted == false)
                                 .FirstAsync()
                                 .ConfigureAwait(false);
             if (product == null)
@@ -224,11 +265,23 @@ namespace OpenAuth.App.ProductManager
 
             product.Status = 1;
             product.UpdateTime = DateTime.Now;
-            await  _db.Updateable(product)
-                     .UpdateColumns(p => new { p.Status, p.UpdateTime })
-                     .ExecuteCommandAsync()
-                     .ConfigureAwait(false);
-           
+
+            // 只把更新写操作包在事务里
+            await _db.Ado.BeginTranAsync();
+            try
+            {
+                await _db.Updateable(product)
+                         .UpdateColumns(p => new { p.Status, p.UpdateTime })
+                         .ExecuteCommandAsync()
+                         .ConfigureAwait(false);
+
+                await _db.Ado.CommitTranAsync();
+            }
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
+            }
         }
 
         /// <summary>
@@ -239,15 +292,14 @@ namespace OpenAuth.App.ProductManager
         public async Task<TableResp<ProductAdminResp>> QueryAdminAsync(QueryProductListReq req)
         {
             var query = _db.Queryable<Product>()
-                .Where(p => !p.IsDeleted)
+                .Where(p => p.IsDeleted == false)
                 .WhereIF(!string.IsNullOrEmpty(req.Name), p => p.Name.Contains(req.Name))
                 .WhereIF(req.Status.HasValue, p => p.Status == req.Status.Value);
 
             var total = await query.CountAsync();
             var list = await query.OrderByDescending(p => p.CreateTime)
-                                  .Skip((req.page - 1) * req.limit)
-                                  .Take(req.limit)
-                                  .ToListAsync();
+                .ToPageListAsync(req.page, req.limit)
+                .ConfigureAwait(false);
 
             var data = list.Select(x => new ProductAdminResp
             {
@@ -281,16 +333,16 @@ namespace OpenAuth.App.ProductManager
                 throw new Exception("商品Id不能为空");
             }
             var result = await _db.Queryable<Product>()
-                .Where(p => p.Id == id && !p.IsDeleted && p.Status == 1)
+                .Where(p => p.Id == id && p.IsDeleted == false && p.Status == 1)
                 .Select(p => new ProductAdminResp
                 {
-                    Id = p.Id, 
+                    Id = p.Id,
                     Name = p.Name,
                     Price = p.Price,
                     ImageUrl = p.ImageUrl,
                     TaobaoLink = p.TaobaoLink,
                     Status = p.Status
-                    
+
                 })
                 .FirstAsync()
                 .ConfigureAwait(false);
@@ -306,8 +358,8 @@ namespace OpenAuth.App.ProductManager
         /// <returns></returns>
         public async Task<List<ProductMiniProgramResp>> QueryForMiniProgramAsync()
         {
-            var result= await _db.Queryable<Product>()
-                .Where(p => !p.IsDeleted && p.Status == 1)
+            var result = await _db.Queryable<Product>()
+                .Where(p => p.IsDeleted ==false && p.Status == 1)
                 .OrderByDescending(p => p.CreateTime)
                 .Select(p => new ProductMiniProgramResp
                 {
@@ -322,7 +374,7 @@ namespace OpenAuth.App.ProductManager
             return result;
         }
 
-       
+
         #endregion 小程序
     }
 }

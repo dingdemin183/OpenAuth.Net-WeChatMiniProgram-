@@ -1,5 +1,6 @@
 ﻿using Castle.Core.Logging;
 using Infrastructure;
+using Microsoft.Extensions.Logging;
 using OpenAuth.App.Interface;
 using OpenAuth.App.Request;
 using OpenAuth.App.Response;
@@ -22,18 +23,20 @@ namespace OpenAuth.App.UserProfile
         private readonly IAuth _auth;
         private readonly WxSecurityService _wxSecurityService;
         private readonly WxAccessTokenService _accessTokenService;
-       
+        private readonly ILogger<UserProfileApp> _logger;
 
         public UserProfileApp(
             ISqlSugarClient db,
             IAuth auth,
             WxSecurityService wxSecurityService,
-            WxAccessTokenService wxAccessTokenService)
+            WxAccessTokenService wxAccessTokenService,
+            ILogger<UserProfileApp> logger)
         {
             _db = db;
             _auth = auth;
             _wxSecurityService = wxSecurityService;
             _accessTokenService = wxAccessTokenService;
+            _logger = logger;
         }
 
         /// <summary>
@@ -42,139 +45,6 @@ namespace OpenAuth.App.UserProfile
         /// <param name="request">请求参数</param>
         /// <returns></returns>
         /// <CommonException cref="CommonException"></CommonException>
-        //public async Task<UserProfileResp> UpdateProfileSyncAsync(UpdateUserProfileReq request)
-        //{
-        //    if (request == null)
-        //        throw new CommonException("请求参数不能为空");
-
-        //    // 获取当前登录用户
-        //    var session = _auth.GetCurrentSession();
-
-        //    if (session?.UserId == null)
-        //    {
-        //        throw new CommonException("用户未登录");
-        //    }
-
-        //    var userId = session.UserId;
-
-        //    // 查询用户第三方认证信息
-        //    var userAuth = await _db.Queryable<SysUserExternalAuth>()
-        //        .FirstAsync(x => x.Id == userId && !x.IsDeleted)
-        //        .ConfigureAwait(false);
-
-        //    if (userAuth == null)
-        //    {
-        //        throw new CommonException("用户不存在");
-        //    }
-
-        //    //var hasNickNameUpdate = false;
-        //    //var hasAvatarUpdate = false;
-
-        //    //// 检测昵称（同步检测）
-        //    //if (!string.IsNullOrEmpty(request.NickName))
-        //    //{
-        //    //    // userAuth.OpenId = "oH5Zc3TxmUx8_IlHtAOTT3JLVlwg";  //写一个正确的openid做测试
-        //    //    var isTextSafe = await _wxSecurityService.CheckTextSecurityAsync(userAuth.OpenId, request.NickName);
-        //    //    if (!isTextSafe)
-        //    //    {
-        //    //        throw new CommonException("昵称包含违规内容，请修改");
-        //    //    }
-
-        //    //    userAuth.NickName = request.NickName;
-        //    //    hasNickNameUpdate = true;
-        //    //}
-
-        //    //// 同步检测头像
-        //    //if (!string.IsNullOrEmpty(request.AvatarUrl))
-        //    //{
-        //    //    try
-        //    //    {
-        //    //        // 同步检测图片是否安全
-        //    //        var isImageSafe = await _wxSecurityService.CheckImageSecuritySyncAsync(request.AvatarUrl);
-
-        //    //        if (!isImageSafe)
-        //    //        {
-        //    //            throw new CommonException("头像包含违规内容，请更换");
-        //    //        }
-
-        //    //        // 检测通过，直接更新头像
-        //    //        userAuth.AvatarUrl = request.AvatarUrl;
-        //    //        // 如果有待审核的头像，清理掉
-        //    //        userAuth.PendingAvatarUrl = null;
-        //    //        userAuth.AvatarAuditStatus = "pass";
-        //    //        userAuth.AvatarTraceId = null;
-        //    //        hasAvatarUpdate = true;
-        //    //    }
-        //    //    catch (Exception ex) when (ex is CommonException)
-        //    //    {
-        //    //        throw; // 重新抛出业务异常
-        //    //    }
-        //    //    catch (Exception ex)
-        //    //    {
-                    
-        //    //        throw new CommonException("头像检测服务异常，请稍后重试");
-        //    //    }
-        //    //}
-
-        //    // 一次性保存所有更新
-        //    if (hasNickNameUpdate || hasAvatarUpdate)
-        //    {
-        //        userAuth.UpdateTime = DateTime.Now;
-
-        //        // 构建需要更新的字段列表
-        //        var updateColumns = new List<string> { "UpdateTime" };
-
-        //        if (hasNickNameUpdate)
-        //        {
-        //            updateColumns.Add("NickName");
-        //        }
-
-        //        if (hasAvatarUpdate)
-        //        {
-        //            updateColumns.Add("AvatarUrl");
-        //            updateColumns.Add("PendingAvatarUrl");
-        //            updateColumns.Add("AvatarAuditStatus");
-        //            updateColumns.Add("AvatarTraceId");
-        //        }
-
-        //        await _db.Updateable(userAuth)
-        //            .UpdateColumns(updateColumns.ToArray())
-        //            .ExecuteCommandAsync()
-        //            .ConfigureAwait(false);
-        //    }
-
-        //    // 构建返回结果
-        //    var resp = new UserProfileResp
-        //    {
-        //        Id = userAuth.Id,
-        //        OpenId = userAuth.OpenId,
-        //        NickName = userAuth.NickName,
-        //        AvatarUrl = userAuth.AvatarUrl,
-        //        UserPhone = userAuth.UserPhone,
-        //        PendingAvatarUrl = userAuth.PendingAvatarUrl,
-        //        AvatarAuditStatus = userAuth.AvatarAuditStatus
-        //    };
-
-        //    // 根据更新情况返回不同的消息
-        //    if (hasAvatarUpdate && hasNickNameUpdate)
-        //    {
-        //        resp.Message = "昵称和头像更新成功";
-        //    }
-        //    else if (hasAvatarUpdate)
-        //    {
-        //        resp.Message = "头像更新成功";
-        //    }
-        //    else if (hasNickNameUpdate)
-        //    {
-        //        resp.Message = "昵称更新成功";
-        //    }
-        //    else
-        //    {
-        //        resp.Message = "没有需要更新的内容";
-        //    }
-
-        //    return resp;
-        //}
         public async Task<UserProfileResp> UpdateProfileSyncAsync(UpdateUserProfileReq request)
         {
             if (request == null)
@@ -192,7 +62,7 @@ namespace OpenAuth.App.UserProfile
 
             // 查询用户第三方认证信息
             var userAuth = await _db.Queryable<SysUserExternalAuth>()
-                .FirstAsync(x => x.Id == userId && !x.IsDeleted)
+                .FirstAsync(x => x.Id == userId && x.IsDeleted == false)
                 .ConfigureAwait(false);
 
             if (userAuth == null)
@@ -235,10 +105,22 @@ namespace OpenAuth.App.UserProfile
                     updateColumns.Add("AvatarUrl");
                 }
 
-                await _db.Updateable(userAuth)
-                    .UpdateColumns(updateColumns.ToArray())
-                    .ExecuteCommandAsync()
-                    .ConfigureAwait(false);
+                // 只把数据库写操作包在事务里
+                await _db.Ado.BeginTranAsync();
+                try
+                {
+                    await _db.Updateable(userAuth)
+                        .UpdateColumns(updateColumns.ToArray())
+                        .ExecuteCommandAsync()
+                        .ConfigureAwait(false);
+
+                    await _db.Ado.CommitTranAsync();
+                }
+                catch
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    throw;
+                }
             }
 
             // 构建返回结果
@@ -298,7 +180,7 @@ namespace OpenAuth.App.UserProfile
 
             // 查询用户第三方认证信息
             var userAuth = await _db.Queryable<SysUserExternalAuth>()
-                .FirstAsync(x => x.Id == userId && !x.IsDeleted)
+                .FirstAsync(x => x.Id == userId && x.IsDeleted == false)
                 .ConfigureAwait(false);
 
             if (userAuth == null)
@@ -340,6 +222,8 @@ namespace OpenAuth.App.UserProfile
                 }
                 catch (Exception ex)
                 {
+                    // 保留原始异常信息，便于排查微信检测服务故障
+                    _logger.LogError(ex, "头像检测服务异常：openId={OpenId}", openId);
                     throw new CommonException("头像检测服务异常，请稍后重试");
                 }
             }
@@ -364,10 +248,22 @@ namespace OpenAuth.App.UserProfile
                     updateColumns.Add("AvatarTraceId");
                 }
 
-                await _db.Updateable(userAuth)
-                    .UpdateColumns(updateColumns.ToArray())
-                    .ExecuteCommandAsync()
-                    .ConfigureAwait(false);
+                // 只把数据库写操作包在事务里
+                await _db.Ado.BeginTranAsync();
+                try
+                {
+                    await _db.Updateable(userAuth)
+                        .UpdateColumns(updateColumns.ToArray())
+                        .ExecuteCommandAsync()
+                        .ConfigureAwait(false);
+
+                    await _db.Ado.CommitTranAsync();
+                }
+                catch
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    throw;
+                }
             }
 
             // 构建返回结果
@@ -408,14 +304,21 @@ namespace OpenAuth.App.UserProfile
         /// </summary>
         public async Task HandleMediaCheckResultAsync(string traceId, string suggest)
         {
+            // 参数校验：traceId 为外部回调输入，必须非空，否则会误命中 AvatarTraceId 为空/默认值的记录
+            if (string.IsNullOrWhiteSpace(traceId))
+            {
+                _logger.LogWarning("微信媒体审核回调缺少 traceId，已忽略");
+                return;
+            }
+
             // 根据 trace_id 查找用户
             var userAuth = await _db.Queryable<SysUserExternalAuth>()
-                .FirstAsync(x => x.AvatarTraceId == traceId && !x.IsDeleted)
+                .FirstAsync(x => x.AvatarTraceId == traceId && x.IsDeleted == false)
                 .ConfigureAwait(false);
 
             if (userAuth == null)
             {
-                // 记录日志：找不到对应的用户
+                _logger.LogWarning("微信媒体审核回调未匹配到用户：traceId={TraceId}", traceId);
                 return;
             }
 
@@ -434,14 +337,26 @@ namespace OpenAuth.App.UserProfile
 
             userAuth.UpdateTime = DateTime.Now;
 
-            await _db.Updateable(userAuth)
-                .UpdateColumns(x => new {
-                    x.AvatarUrl,
-                    x.AvatarAuditStatus,
-                    x.UpdateTime
-                })
-                .ExecuteCommandAsync()
-                .ConfigureAwait(false);
+            // 只把数据库写操作包在事务里
+            await _db.Ado.BeginTranAsync();
+            try
+            {
+                await _db.Updateable(userAuth)
+                    .UpdateColumns(x => new {
+                        x.AvatarUrl,
+                        x.AvatarAuditStatus,
+                        x.UpdateTime
+                    })
+                    .ExecuteCommandAsync()
+                    .ConfigureAwait(false);
+
+                await _db.Ado.CommitTranAsync();
+            }
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
+            }
         }
 
         /// <summary>
@@ -460,7 +375,7 @@ namespace OpenAuth.App.UserProfile
             var userId = session?.UserId;
 
             var userAuth = await _db.Queryable<SysUserExternalAuth>()
-                .FirstAsync(x => x.Id == userId && !x.IsDeleted)
+                .FirstAsync(x => x.Id == userId && x.IsDeleted == false)
                 .ConfigureAwait(false);
 
             if (userAuth == null)

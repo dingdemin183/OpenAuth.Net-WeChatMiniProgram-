@@ -29,6 +29,7 @@ using OpenAuth.App.WxPay;
 using OpenAuth.Repository;
 using OpenAuth.Repository.Interface;
 using SKIT.FlurlHttpClient.Wechat.TenpayV3;
+using SKIT.FlurlHttpClient.Wechat.TenpayV3.Settings;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -90,7 +91,7 @@ namespace OpenAuth.App
 
             //注册app层（排除 WeChatPayV3Signer）
             builder.RegisterAssemblyTypes(Assembly.GetExecutingAssembly());
-                   //.Where(t => t != typeof(WeChatPayV3Signer));
+                  
 
             builder.RegisterType(typeof(CacheContext)).As(typeof(ICacheContext));
             builder.RegisterType(typeof(HttpContextAccessor)).As(typeof(IHttpContextAccessor));
@@ -102,71 +103,66 @@ namespace OpenAuth.App
 
             builder.RegisterModule(new QuartzAutofacFactoryModule());
         }
-
         /// <summary>
-        /// 注册微信支付签名器
+        /// 注册 SKIT 的 WechatTenpayClient
         /// </summary>
-        // 新的：注册 SKIT 的 WechatTenpayClient
+        /// <param name="builder"></param>
+        /// <exception cref="InvalidOperationException"></exception>
         private static void RegisterWeChatPaySigner(ContainerBuilder builder)
         {
-            //  注册 SKIT 客户端配置
             builder.Register(componentContext =>
             {
-                var appSettingOptions = componentContext.Resolve<IOptions<AppSetting>>();
-                var config = appSettingOptions.Value.WeChatPay;
+                var config = componentContext.Resolve<IOptions<AppSetting>>().Value.WeChatPay
+                    ?? throw new InvalidOperationException("WeChatPay 配置未加载");
 
-                if (config == null)
-                    throw new InvalidOperationException("WeChatPay 配置未加载");
-
-                // 验证必要配置
                 if (string.IsNullOrEmpty(config.MchId))
                     throw new InvalidOperationException("微信支付配置缺失: MchId");
                 if (string.IsNullOrEmpty(config.SerialNo))
                     throw new InvalidOperationException("微信支付配置缺失: SerialNo");
                 if (string.IsNullOrEmpty(config.ApiV3Key))
                     throw new InvalidOperationException("微信支付配置缺失: ApiV3Key");
-                if (string.IsNullOrEmpty(config.PrivateKeyPath))
-                    throw new InvalidOperationException("微信支付配置缺失: PrivateKeyPath");
+                if (string.IsNullOrEmpty(config.PlatformPublicKeyId))
+                    throw new InvalidOperationException("微信支付配置缺失: PlatformPublicKeyId");
 
-                // 从文件加载私钥内容
-                var privateKeyContent = config.GetPrivateKeyContent();
+                //  平台公钥管理器：加载微信支付公钥 + 公钥ID
+                var publicKeyManager = new InMemoryPublicKeyManager();
+                publicKeyManager.AddEntry(new PublicKeyEntry(
+                    PublicKeyEntry.ALGORITHM_TYPE_RSA,
+                    config.PlatformPublicKeyId,
+                    config.GetPlatformPublicKeyContent()
+                ));
 
-                // 构建 SKIT 客户端选项
                 var options = new WechatTenpayClientOptions()
                 {
                     MerchantId = config.MchId,
                     MerchantCertificateSerialNumber = config.SerialNo,
-                    MerchantCertificatePrivateKey = privateKeyContent,
+                    MerchantCertificatePrivateKey = config.GetPrivateKeyContent(),
                     MerchantV3Secret = config.ApiV3Key,
-                    AutoEncryptRequestSensitiveProperty = true,   // 自动加密敏感字段
-                    AutoDecryptResponseSensitiveProperty = true,  // 自动解密响应
+
+                    //  关键改动：从证书模式切换为公钥模式
+                    PlatformAuthScheme = PlatformAuthScheme.PublicKey,
+                    PlatformPublicKeyManager = publicKeyManager,
+
+                    AutoEncryptRequestSensitiveProperty = true,
+                    AutoDecryptResponseSensitiveProperty = true,
                     Timeout = 30
                 };
 
                 return options;
             })
             .AsSelf()
-            .SingleInstance();  // 配置是单例
+            .SingleInstance();
 
-            // 注册 SKIT 客户端
             builder.Register(componentContext =>
             {
                 var options = componentContext.Resolve<WechatTenpayClientOptions>();
-
-                // 使用 Builder 创建客户端
                 return WechatTenpayClientBuilder
                     .Create(options)
-                    .ConfigureSettings(settings =>
-                    {
-                        settings.Timeout = TimeSpan.FromSeconds(30);
-                    })
+                    .ConfigureSettings(settings => settings.Timeout = TimeSpan.FromSeconds(30))
                     .Build();
             })
             .As<WechatTenpayClient>()
-            .InstancePerLifetimeScope();  // 或 .SingleInstance()，客户端是线程安全的
-
-            // ⭐ 注意：不再注册 WeChatPayV3Signer
-            // 如果你有其他地方依赖 WeChatPayV3Signer，需要改为依赖 WechatTenpayClient
+            .SingleInstance();
         }
         /// <summary>
         /// 注入所有继承了IDependency接口

@@ -1,4 +1,3 @@
-﻿using Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -37,75 +36,102 @@ namespace OpenAuth.WebApi.Controllers
         /// <summary>
         /// 微信支付异步回调（V3）
         /// </summary>
-        [HttpPost("WeChatPayNotify")]
+        [HttpPost]
         [IgnoreAntiforgeryToken]
         [AllowAnonymous]
         public async Task<IActionResult> WeChatPayNotify()
         {
+            string requestBody;
+            using (var reader = new StreamReader(Request.Body))
+            {
+                requestBody = await reader.ReadToEndAsync().ConfigureAwait(false);
+            }
+
+            // 验签所需的 HTTP Headers
+            var wechatpaySignature = Request.Headers["Wechatpay-Signature"].ToString();
+            var wechatpayTimestamp = Request.Headers["Wechatpay-Timestamp"].ToString();
+            var wechatpayNonce = Request.Headers["Wechatpay-Nonce"].ToString();
+            var wechatpaySerial = Request.Headers["Wechatpay-Serial"].ToString();
+
+            // 检查必要的 Header（验签失败返回 4xx，微信不会重试）
+            if (string.IsNullOrEmpty(wechatpaySignature) ||
+                string.IsNullOrEmpty(wechatpayTimestamp) ||
+                string.IsNullOrEmpty(wechatpayNonce) ||
+                string.IsNullOrEmpty(wechatpaySerial))
+            {
+                _logger.LogWarning("支付回调缺少必要的签名头");
+                return StatusCode(400, new { code = "FAIL", message = "缺少必要的签名头" });
+            }
+
+            // 验签：失败返回 4xx，微信不重试
+            var isValid = _client.VerifyEventSignature(
+                webhookTimestamp: wechatpayTimestamp,
+                webhookNonce: wechatpayNonce,
+                webhookBody: requestBody,
+                webhookSignature: wechatpaySignature,
+                webhookSerialNumber: wechatpaySerial
+            );
+
+            if (!isValid)
+            {
+                _logger.LogWarning("支付回调验签失败");
+                return StatusCode(401, new { code = "FAIL", message = "验签失败" });
+            }
+
+            // 反序列化为事件
+            var callbackModel = _client.DeserializeEvent(requestBody);
+
+            // 只处理 TRANSACTION.SUCCESS
+            if (!"TRANSACTION.SUCCESS".Equals(callbackModel.EventType))
+            {
+                _logger.LogWarning("收到未处理的支付事件类型：{EventType}", callbackModel.EventType);
+                // 未处理的事件类型返回 204，让微信不再重试
+                return StatusCode(204);
+            }
+
+            // 解密资源
+            var payData = _client.DecryptEventResource<SKIT.FlurlHttpClient.Wechat.TenpayV3.Events.TransactionResource>(callbackModel);
+
+            _logger.LogInformation("收到支付成功回调：商户订单号={OutTradeNo}，微信交易单号={TransactionId}，金额={Amount}分，支付时间={SuccessTime}",
+                payData.OutTradeNumber,
+                payData.TransactionId,
+                payData.Amount?.Total,
+                payData.SuccessTime);
+
+            // 调用业务服务处理，根据结果决定返回码
+            CallbackProcessResult result;
             try
             {
-                // 读取请求体原始内容
-                var requestBody = await new StreamReader(Request.Body).ReadToEndAsync();
-
-                _logger.LogInformation($"收到微信支付V3回调，Body: {requestBody}");
-
-                // 获取验签所需的 HTTP Headers
-                var wechatpaySignature = Request.Headers["Wechatpay-Signature"].ToString();
-                var wechatpayTimestamp = Request.Headers["Wechatpay-Timestamp"].ToString();
-                var wechatpayNonce = Request.Headers["Wechatpay-Nonce"].ToString();
-                var wechatpaySerial = Request.Headers["Wechatpay-Serial"].ToString();
-
-                // 检查必要的 Header
-                if (string.IsNullOrEmpty(wechatpaySignature) ||
-                    string.IsNullOrEmpty(wechatpayTimestamp) ||
-                    string.IsNullOrEmpty(wechatpayNonce) ||
-                    string.IsNullOrEmpty(wechatpaySerial))
-                {
-                    _logger.LogWarning("回调请求缺少必要的签名头");
-                    return StatusCode(400, new { code = "FAIL", message = "缺少必要的签名头" });
-                }
-
-                //正确的验签方法：VerifyEventSignature
-                var isValid = _client.VerifyEventSignature(
-                    webhookTimestamp: wechatpayTimestamp,
-                    webhookNonce: wechatpayNonce,
-                    webhookBody: requestBody,
-                    webhookSignature: wechatpaySignature,
-                    webhookSerialNumber: wechatpaySerial
-                );
-
-                if (!isValid)
-                {
-                    _logger.LogWarning("回调验签失败");
-                    return StatusCode(400, new { code = "FAIL", message = "验签失败" });
-                }
-
-                // 先反序列化为 WechatTenpayEvent
-                var callbackModel = _client.DeserializeEvent(requestBody);
-
-                // 根据 EventType 判断事件类型，再解密资源
-                if ("TRANSACTION.SUCCESS".Equals(callbackModel.EventType))
-                {
-                    var payData = _client.DecryptEventResource<SKIT.FlurlHttpClient.Wechat.TenpayV3.Events.TransactionResource>(callbackModel);
-
-                    _logger.LogInformation($"支付成功，商户订单号: {payData.OutTradeNumber}, 微信交易单号: {payData.TransactionId}");
-
-                    // 调用业务服务处理
-                    await _callBackService.ProcessPaymentAsync(payData);
-                }
-                else
-                {
-                    _logger.LogWarning($"收到未处理的支付事件类型: {callbackModel.EventType}");
-                }
-
-                // 微信支付要求成功返回 200 或 204，无需返回报文体
-                return StatusCode(204);
+                result = await _callBackService.ProcessPaymentAsync(payData).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "支付回调处理异常");
+                // 兜底：业务层未捕获的异常，按临时性失败处理，让微信重试
+                _logger.LogError(ex, "支付回调业务处理抛出异常：订单号={OrderNo}", payData.OutTradeNumber);
                 return StatusCode(500, new { code = "FAIL", message = "处理异常" });
             }
+
+            // 根据业务结果决定状态码：
+            // - Success / AlreadyProcessed / PermanentFailure → 2xx，微信不再重试
+            // - TemporaryFailure → 500，微信会重试
+            if (result.ShouldRetry)
+            {
+                _logger.LogWarning("支付回调业务临时失败，将让微信重试：{OrderNo}，{Message}",
+                    payData.OutTradeNumber, result.Message);
+                return StatusCode(500, new { code = "FAIL", message = result.Message });
+            }
+
+            if (!result.IsSuccess)
+            {
+                // 永久性失败（订单不存在、金额不一致等），返回 200 + 失败原因
+                // 不让微信重试（重试结果相同），由对账系统或人工补偿
+                _logger.LogError("【支付回调永久失败告警】{OrderNo}，{Message}，请人工对账",
+                    payData.OutTradeNumber, result.Message);
+                return StatusCode(200, new { code = "FAIL", message = result.Message });
+            }
+
+            // 成功或幂等已处理
+            return StatusCode(204);
         }
 
         #endregion
@@ -115,244 +141,93 @@ namespace OpenAuth.WebApi.Controllers
         /// <summary>
         /// 微信退款异步回调
         /// </summary>
-        [HttpPost("WeChatRefundNotify")]
+        [HttpPost]
         [IgnoreAntiforgeryToken]
         [AllowAnonymous]
         public async Task<IActionResult> WeChatRefundNotify()
         {
+            string requestBody;
+            using (var reader = new StreamReader(Request.Body))
+            {
+                requestBody = await reader.ReadToEndAsync().ConfigureAwait(false);
+            }
+
+            // 验签所需的 HTTP Headers
+            var wechatpaySignature = Request.Headers["Wechatpay-Signature"].ToString();
+            var wechatpayTimestamp = Request.Headers["Wechatpay-Timestamp"].ToString();
+            var wechatpayNonce = Request.Headers["Wechatpay-Nonce"].ToString();
+            var wechatpaySerial = Request.Headers["Wechatpay-Serial"].ToString();
+
+            if (string.IsNullOrEmpty(wechatpaySignature) ||
+                string.IsNullOrEmpty(wechatpayTimestamp) ||
+                string.IsNullOrEmpty(wechatpayNonce) ||
+                string.IsNullOrEmpty(wechatpaySerial))
+            {
+                _logger.LogWarning("退款回调缺少必要的签名头");
+                return StatusCode(400, new { code = "FAIL", message = "缺少必要的签名头" });
+            }
+
+            var isValid = _client.VerifyEventSignature(
+                webhookTimestamp: wechatpayTimestamp,
+                webhookNonce: wechatpayNonce,
+                webhookBody: requestBody,
+                webhookSignature: wechatpaySignature,
+                webhookSerialNumber: wechatpaySerial
+            );
+
+            if (!isValid)
+            {
+                _logger.LogWarning("退款回调验签失败");
+                return StatusCode(401, new { code = "FAIL", message = "验签失败" });
+            }
+
+            var callbackModel = _client.DeserializeEvent(requestBody);
+
+            // 退款事件类型：REFUND.SUCCESS / REFUND.ABNORMAL / REFUND.CLOSED
+            if (!"REFUND.SUCCESS".Equals(callbackModel.EventType) &&
+                !"REFUND.ABNORMAL".Equals(callbackModel.EventType) &&
+                !"REFUND.CLOSED".Equals(callbackModel.EventType))
+            {
+                _logger.LogWarning("收到未处理的退款事件类型：{EventType}", callbackModel.EventType);
+                return StatusCode(204);
+            }
+
+            var refundData = _client.DecryptEventResource<SKIT.FlurlHttpClient.Wechat.TenpayV3.Events.RefundResource>(callbackModel);
+
+            _logger.LogInformation("收到退款回调：商户退款单号={OutRefundNo}，微信退款单号={RefundId}，事件={EventType}",
+                refundData.OutRefundNumber,
+                refundData.RefundId,
+                callbackModel.EventType);
+
+            CallbackProcessResult result;
             try
             {
-                // 读取请求体原始内容
-                var requestBody = await new StreamReader(Request.Body).ReadToEndAsync();
-
-                _logger.LogInformation($"收到微信支付退款回调，Body: {requestBody}");
-
-                // 获取验签所需的 HTTP Headers
-                var wechatpaySignature = Request.Headers["Wechatpay-Signature"].ToString();
-                var wechatpayTimestamp = Request.Headers["Wechatpay-Timestamp"].ToString();
-                var wechatpayNonce = Request.Headers["Wechatpay-Nonce"].ToString();
-                var wechatpaySerial = Request.Headers["Wechatpay-Serial"].ToString();
-
-                // 检查必要的 Header
-                if (string.IsNullOrEmpty(wechatpaySignature) ||
-                    string.IsNullOrEmpty(wechatpayTimestamp) ||
-                    string.IsNullOrEmpty(wechatpayNonce) ||
-                    string.IsNullOrEmpty(wechatpaySerial))
-                {
-                    _logger.LogWarning("退款回调请求缺少必要的签名头");
-                    return StatusCode(400, new { code = "FAIL", message = "缺少必要的签名头" });
-                }
-
-                // 正确的验签方法
-                var isValid = _client.VerifyEventSignature(
-                    webhookTimestamp: wechatpayTimestamp,
-                    webhookNonce: wechatpayNonce,
-                    webhookBody: requestBody,
-                    webhookSignature: wechatpaySignature,
-                    webhookSerialNumber: wechatpaySerial
-                );
-
-                if (!isValid)
-                {
-                    _logger.LogWarning("退款回调验签失败");
-                    return StatusCode(400, new { code = "FAIL", message = "验签失败" });
-                }
-
-                // 解析事件
-                var callbackModel = _client.DeserializeEvent(requestBody);
-
-                // 退款事件类型：REFUND.SUCCESS / REFUND.ABNORMAL / REFUND.CLOSED
-                if ("REFUND.SUCCESS".Equals(callbackModel.EventType) ||
-                    "REFUND.ABNORMAL".Equals(callbackModel.EventType) ||
-                    "REFUND.CLOSED".Equals(callbackModel.EventType))
-                {
-                    var refundData = _client.DecryptEventResource<SKIT.FlurlHttpClient.Wechat.TenpayV3.Events.RefundResource>(callbackModel);
-
-                    _logger.LogInformation($"退款回调处理，商户退款单号: {refundData.OutRefundNumber}, 微信退款单号: {refundData.RefundId}, 状态: {callbackModel.EventType}");
-
-                    // 调用业务服务处理
-                    await _callBackService.ProcessRefundAsync(refundData, callbackModel.EventType);
-                }
-                else
-                {
-                    _logger.LogWarning($"收到未处理的退款事件类型: {callbackModel.EventType}");
-                }
-
-                // 返回 204
-                return StatusCode(204);
+                result = await _callBackService.ProcessRefundAsync(refundData, callbackModel.EventType).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "退款回调处理异常");
+                _logger.LogError(ex, "退款回调业务处理抛出异常：退款单号={RefundNo}",
+                    refundData.OutRefundNumber);
                 return StatusCode(500, new { code = "FAIL", message = "处理异常" });
             }
+
+            if (result.ShouldRetry)
+            {
+                _logger.LogWarning("退款回调业务临时失败，将让微信重试：{RefundNo}，{Message}",
+                    refundData.OutRefundNumber, result.Message);
+                return StatusCode(500, new { code = "FAIL", message = result.Message });
+            }
+
+            if (!result.IsSuccess)
+            {
+                _logger.LogError("【退款回调永久失败告警】退款单号={RefundNo}，{Message}，请人工对账",
+                    refundData.OutRefundNumber, result.Message);
+                return StatusCode(200, new { code = "FAIL", message = result.Message });
+            }
+
+            return StatusCode(204);
         }
 
         #endregion
     }
 }
-
-
-
-
-
-
-//using Infrastructure;
-//using Microsoft.AspNetCore.Authorization;
-//using Microsoft.AspNetCore.Mvc;
-//using Microsoft.Extensions.Logging;
-//using OpenAuth.App.Warranty;
-//using OpenAuth.App.WxPay;
-//using System;
-//using System.Collections.Generic;
-//using System.IO;
-//using System.Threading.Tasks;
-
-//namespace OpenAuth.WebApi.Controllers
-//{
-//    /// <summary>
-//    /// 支付回调接口（不需要认证，微信服务器调用）
-//    /// </summary>
-//    [Route("api/[controller]/[action]")]
-//    [ApiController]
-//    [ApiExplorerSettings(GroupName = "支付回调_PayCallback")]
-//    public class PayCallbackController : ControllerBase
-//    {
-//        private readonly WarrantyApp _warrantyApp;
-//        private readonly ILogger<PayCallbackController> _logger;
-//        private readonly CallBackService _callBackService;
-
-//        public PayCallbackController(
-//            WarrantyApp warrantyApp,
-//            ILogger<PayCallbackController> logger,
-//             CallBackService callBackService)
-//        {
-//            _warrantyApp = warrantyApp;
-//            _logger = logger;
-//            _callBackService = callBackService;
-//        }
-
-//        #region 微信支付异步回调（V3）
-//        /// <summary>
-//        /// 微信支付异步回调（V3）
-//        /// </summary>
-//        /// <returns></returns>
-//        [HttpPost("WeChatPayNotify")]
-//        [IgnoreAntiforgeryToken]
-//        [AllowAnonymous]
-//        public async Task<IActionResult> WeChatPayNotify()
-//        {
-//            try
-//            {
-//                // 读取请求体原始内容
-//                var requestBody = await new StreamReader(Request.Body).ReadToEndAsync();
-
-//                _logger.LogInformation($"收到微信支付V3回调，Body: {requestBody}");
-
-//                // 获取验签所需的 HTTP Headers
-//                var wechatpaySignature = Request.Headers["Wechatpay-Signature"].ToString();
-//                var wechatpayTimestamp = Request.Headers["Wechatpay-Timestamp"].ToString();
-//                var wechatpayNonce = Request.Headers["Wechatpay-Nonce"].ToString();
-//                var wechatpaySerial = Request.Headers["Wechatpay-Serial"].ToString();
-
-//                // 检查必要的 Header
-//                if (string.IsNullOrEmpty(wechatpaySignature) ||
-//                    string.IsNullOrEmpty(wechatpayTimestamp) ||
-//                    string.IsNullOrEmpty(wechatpayNonce) ||
-//                    string.IsNullOrEmpty(wechatpaySerial))
-//                {
-//                    _logger.LogWarning("回调请求缺少必要的签名头");
-//                    return Content("缺少必要的签名头", "application/json");
-//                }
-
-//                // 处理回调
-//                var result = await _callBackService.HandlePayCallbackAsync(
-//                    requestBody,
-//                    wechatpaySignature,
-//                    wechatpayTimestamp,
-//                    wechatpayNonce,
-//                    wechatpaySerial
-//                );
-
-//                if (!result.Success)
-//                {
-//                    _logger.LogWarning($"回调处理失败: {result.ErrorMessage}");
-//                    return StatusCode(400, new { code = "FAIL", message = result.ErrorMessage });
-//                }
-
-//                // 验签通过返回 200（无内容）
-//                return StatusCode(200);
-//            }
-//            catch (Exception ex)
-//            {
-//                _logger.LogError(ex, "支付回调处理异常");
-//                return StatusCode(500, new { code = "FAIL", message = "处理异常" });
-//            }
-//        }
-//        #endregion
-
-//        #region 微信退款 异步回调
-
-//        /// <summary>
-//        /// 微信支付异步回调（退款回调）
-//        /// </summary>
-//        /// <returns></returns>
-//        [HttpPost("WeChatRefundNotify")]
-//        [IgnoreAntiforgeryToken]
-//        [AllowAnonymous]
-//        public async Task<IActionResult> WeChatRefundNotify()
-//        {
-//            try
-//            {
-//                // 读取请求体原始内容
-//                var requestBody = await new StreamReader(Request.Body).ReadToEndAsync();
-
-//                _logger.LogInformation($"收到微信支付退款回调，Body: {requestBody}");
-
-//                // 获取验签所需的 HTTP Headers
-//                var wechatpaySignature = Request.Headers["Wechatpay-Signature"].ToString();
-//                var wechatpayTimestamp = Request.Headers["Wechatpay-Timestamp"].ToString();
-//                var wechatpayNonce = Request.Headers["Wechatpay-Nonce"].ToString();
-//                var wechatpaySerial = Request.Headers["Wechatpay-Serial"].ToString();
-
-//                // 检查必要的 Header
-//                if (string.IsNullOrEmpty(wechatpaySignature) ||
-//                    string.IsNullOrEmpty(wechatpayTimestamp) ||
-//                    string.IsNullOrEmpty(wechatpayNonce) ||
-//                    string.IsNullOrEmpty(wechatpaySerial))
-//                {
-//                    _logger.LogWarning("退款回调请求缺少必要的签名头");
-//                    return Content("缺少必要的签名头", "application/json");
-//                }
-
-//                // 处理退款回调
-//                var result = await _callBackService.HandleRefundCallbackAsync(
-//                    requestBody,
-//                    wechatpaySignature,
-//                    wechatpayTimestamp,
-//                    wechatpayNonce,
-//                    wechatpaySerial
-//                );
-
-//                if (!result.Success)
-//                {
-//                    _logger.LogWarning($"退款回调处理失败: {result.ErrorMessage}");
-//                    return StatusCode(400, new { code = "FAIL", message = result.ErrorMessage });
-//                }
-
-//                // 验签通过返回 200（无内容）
-//                return StatusCode(200);
-//            }
-//            catch (Exception ex)
-//            {
-//                _logger.LogError(ex, "退款回调处理异常");
-//                return StatusCode(500, new { code = "FAIL", message = "处理异常" });
-//            }
-//        }
-//        #endregion 退款回调
-
-
-
-
-//    }
-//}

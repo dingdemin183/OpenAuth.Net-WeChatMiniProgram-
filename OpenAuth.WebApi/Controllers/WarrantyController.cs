@@ -72,6 +72,8 @@ namespace OpenAuth.WebApi.Controllers
         /// <summary>
         /// 延保订单审核（通过/拒绝，拒绝时自动退款）
         /// </summary>
+        /// <param name="request">请求参数</param>
+        /// <returns></returns>
         [HttpPost]
         public async Task<Response<bool>> AuditWarrantyOrder([FromBody] AuditWarrantyOrderReq request)
         {
@@ -88,6 +90,32 @@ namespace OpenAuth.WebApi.Controllers
             {
                 result.Code = 500;
                 result.Message = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                result.Code = 500;
+                result.Message = ex.Message;
+            }
+            return result;
+        }
+
+        // OpenAuth.WebApi/Controllers/WarrantyController.cs 中添加
+
+        /// <summary>
+        /// 查询订单支付状态（主动同步微信）
+        /// </summary>
+        /// <param name="orderNo">商户订单号</param>
+        /// <returns></returns>
+        [HttpGet]
+        public async Task<Response<WarrantyOrderQueryResp>> QueryOrderStatusFromWechat(string orderNo)
+        {
+            var result = new Response<WarrantyOrderQueryResp>();
+            try
+            {
+                var data = await _warrantyApp.QueryOrderStatusFromWechatAsync(orderNo);
+                result.Code = 200;
+                result.Message = "查询成功";
+                result.Data = data;
             }
             catch (Exception ex)
             {

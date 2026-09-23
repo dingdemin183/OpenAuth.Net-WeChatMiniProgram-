@@ -1,7 +1,6 @@
-﻿using System;
-using System.Linq;
-using Autofac;
+﻿using Autofac;
 using Infrastructure;
+using log4net.Core;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -9,12 +8,16 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using OpenAuth.App;
+using OpenAuth.App.SSO;
+using OpenAuth.IdentityServer.Handlers;
 using OpenAuth.Repository;
 using OpenIddict.Abstractions;
-using SqlSugar;
 using OpenIddict.Server;
-using OpenAuth.IdentityServer.Handlers;
+using SqlSugar;
+using System;
+using System.Linq;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 using static OpenIddict.Server.OpenIddictServerEvents;
 
@@ -32,6 +35,9 @@ namespace OpenAuth.IdentityServer
         
         public void ConfigureServices(IServiceCollection services)
         {
+            var loggerFactory = LoggerFactory.Create(builder => { builder.AddLog4Net(); });
+            Microsoft.Extensions.Logging.ILogger logger = loggerFactory.CreateLogger<Startup>();
+
             services.AddControllersWithViews();
 
             // Cookie 认证（用于登录页面维持会话）
@@ -137,7 +143,26 @@ namespace OpenAuth.IdentityServer
                     IsAutoCloseConnection = true
                 });
 
-                 if(sugarDbtype.Value != SqlSugar.DbType.PostgreSQL){
+                sqlSugar.Aop.OnLogExecuting = (sql, pars) =>
+                {
+                    //Console.WriteLine(sql);//输出sql,查看执行sql 性能无影响
+
+                    //if(!SysConfig.IsOnline)
+                    //{
+                    //    Common.Log.Info(UtilMethods.GetSqlString(dbType, sql, pars));
+                    //    //获取无参数化SQL 对性能有影响，特别大的SQL参数多的，调试使用
+                    //    //UtilMethods.GetSqlString(DbType.SqlServer,sql,pars)
+                    //}
+
+                    //获取原生SQL推荐 5.1.4.63  性能OK
+                    //Console.WriteLine(UtilMethods.GetNativeSql(sql, pars));
+                    logger?.LogInformation(UtilMethods.GetSqlString(sugarDbtype.Value, sql, pars));
+     
+                    //LogHelper.Debug(UtilMethods.GetNativeSql(sql, pars));
+                };
+
+                if (sugarDbtype.Value != SqlSugar.DbType.PostgreSQL)
+                {
                     return sqlSugar;
                 }
                 // 配置bool类型转换为smallint
@@ -155,6 +180,8 @@ namespace OpenAuth.IdentityServer
                     // 返回修改后的 SQL 和参数
                     return new System.Collections.Generic.KeyValuePair<string, SugarParameter[]>(sql, parameters);
                 };
+
+                
                 return sqlSugar;
             });
 

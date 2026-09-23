@@ -1,5 +1,4 @@
 ﻿using Infrastructure;
-using Microsoft.Extensions.Configuration.UserSecrets;
 using OpenAuth.App.Interface;
 using OpenAuth.App.Request;
 using OpenAuth.App.Response;
@@ -34,17 +33,22 @@ namespace OpenAuth.App.Repair
         /// <returns></returns>
         public async Task<TableResp<RepairOrderResp>> QueryAsync(QueryRepairOrderListReq request)
         {
+            if (request == null)
+                throw new CommonException("请求参数不能为空");
+            if (request.page < 1)
+                throw new CommonException("页码必须大于 0");
+            if (request.limit < 1 || request.limit > 200)
+                throw new CommonException("每页数量必须在 1-200 之间");
+
             var query = _db.Queryable<RepairOrder>()
-                .Where(x => !x.IsDeleted);
+                .Where(x => x.IsDeleted == false);
 
             // 状态筛选
             if (request.Status.HasValue)
             {
                 query = query.Where(x => x.Status == request.Status.Value);
             }
-           //// 只要能 new 出来，说明引用成功
-           //var client = new WechatApiClient(new WechatApiClientOptions());
-           // Console.WriteLine("引用成功！");
+
             // 手机号模糊搜索
             if (!string.IsNullOrEmpty(request.Phone))
             {
@@ -80,9 +84,7 @@ namespace OpenAuth.App.Repair
             // 分页
             var list = await query
                 .OrderByDescending(x => x.CreateTime)
-                .Skip((request.page - 1) * request.limit)
-                .Take(request.limit)
-                .ToListAsync();
+                .ToPageListAsync(request.page, request.limit);
 
             // 转换为 DTO
             var respList = list.Select(x => new RepairOrderResp
@@ -129,7 +131,7 @@ namespace OpenAuth.App.Repair
         public async Task<RepairOrderResp> GetDetailAsync(string id)
         {
             var entity = await _db.Queryable<RepairOrder>()
-                .FirstAsync(x => x.Id == id && !x.IsDeleted);
+                .FirstAsync(x => x.Id == id && x.IsDeleted == false);
 
             if (entity == null)
             {
@@ -171,12 +173,11 @@ namespace OpenAuth.App.Repair
         public async Task<int> GetRepairOrderCountAsync()
         {
             var count = await _db.Queryable<RepairOrder>()
-                .Where(t => !t.IsDeleted)
+                .Where(t => t.IsDeleted == false)
                 .GroupBy(t => t.UserId)
                 .Select(t => t.UserId)
                 .CountAsync()
                 .ConfigureAwait(false);
-
             return count;
         }
 
@@ -203,7 +204,7 @@ namespace OpenAuth.App.Repair
                 throw new CommonException("请填写拒绝理由");
             }
             var entity = await _db.Queryable<RepairOrder>()
-                .FirstAsync(x => x.Id == request.Id && !x.IsDeleted)
+                .FirstAsync(x => x.Id == request.Id && x.IsDeleted == false)
                 .ConfigureAwait(false);
 
             if (entity == null)
@@ -221,11 +222,22 @@ namespace OpenAuth.App.Repair
             entity.HandledTime = DateTime.Now;
             entity.UpdateTime = DateTime.Now;
 
-            var result = await _db.Updateable(entity)
-                .UpdateColumns(x => new { x.Status, x.Remark, x.HandlerId, x.HandledTime, x.UpdateTime })
-                .ExecuteCommandAsync()
-                .ConfigureAwait(false);
+            // 只把数据库写操作包在事务里
+            await _db.Ado.BeginTranAsync();
+            try
+            {
+                await _db.Updateable(entity)
+                    .UpdateColumns(x => new { x.Status, x.Remark, x.HandlerId, x.HandledTime, x.UpdateTime })
+                    .ExecuteCommandAsync()
+                    .ConfigureAwait(false);
 
+                await _db.Ado.CommitTranAsync();
+            }
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
+            }
         }
 
        
@@ -235,18 +247,21 @@ namespace OpenAuth.App.Repair
         public async Task DeleteAsync(string id)
         {
             var entity = await _db.Queryable<RepairOrder>()
-                                  .FirstAsync(x => x.Id == id && !x.IsDeleted)
+                                  .FirstAsync(x => x.Id == id && x.IsDeleted == false)
                                   .ConfigureAwait(false);
 
             if (entity == null)
             {
                 throw new CommonException("报修单不存在");
             }
+
+            entity.IsDeleted = true;
+            entity.UpdateTime = DateTime.Now;
+
+            // 只把数据库写操作包在事务里
+            await _db.Ado.BeginTranAsync();
             try
             {
-                entity.IsDeleted = true;
-                entity.UpdateTime = DateTime.Now;
-
                 var result = await _db.Updateable(entity)
                                       .UpdateColumns(x => new { x.IsDeleted, x.UpdateTime })
                                       .ExecuteCommandAsync()
@@ -254,15 +269,22 @@ namespace OpenAuth.App.Repair
 
                 if (result <= 0)
                 {
+                    await _db.Ado.RollbackTranAsync();
                     throw new CommonException("删除失败");
                 }
 
+                await _db.Ado.CommitTranAsync();
             }
-            catch (CommonException ex)
+            catch (CommonException)
             {
-                throw new CommonException($"删除失败: {ex.Message}");
+                // 业务校验异常已经回滚过事务，直接抛出，避免重复 Rollback 报错
+                throw;
             }
-
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
+            }
         }
 
         /// <summary>
@@ -330,19 +352,37 @@ namespace OpenAuth.App.Repair
                 City = request.City,
                 Area = request.Area,
                 DetailAddress = request.DetailAddress,
-                Status = 2, // 未报修
+                Status = 2, // 未处理（待审核）
                 CreateTime = DateTime.Now,
                 IsDeleted = false
             };
 
-            var result = await _db.Insertable(entity).ExecuteCommandAsync();
-            if (result <= 0)
+            // 只把数据库写操作包在事务里
+            await _db.Ado.BeginTranAsync();
+            try
             {
-                throw new CommonException("提交报修失败");
+                var result = await _db.Insertable(entity)
+                    .ExecuteCommandAsync()
+                    .ConfigureAwait(false);
+
+                if (result <= 0)
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    throw new CommonException("提交报修失败");
+                }
+
+                await _db.Ado.CommitTranAsync();
+            }
+            catch (CommonException)
+            {
+                throw;
+            }
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
             }
             return entity.Id;
-
-
         }
 
         /// <summary>
@@ -361,7 +401,7 @@ namespace OpenAuth.App.Repair
 
             // 查询用户的所有报修单（按创建时间倒序）
             var repairOrders = await _db.Queryable<RepairOrder>()
-                .Where(x => !x.IsDeleted && x.UserId == userId)
+                .Where(x => x.IsDeleted == false && x.UserId == userId)
                 .OrderByDescending(x => x.CreateTime)
                 .ToListAsync()
                 .ConfigureAwait(false);
@@ -438,7 +478,13 @@ namespace OpenAuth.App.Repair
                 throw new CommonException("未找到报修单信息或无权限修改");
             }
 
-            // 更新实体
+            // 已审核的报修单不允许用户修改（避免覆盖审核字段 Status/HandlerId/HandledTime）
+            if (existingRepair.Status != 2)
+            {
+                throw new CommonException("报修单已审核，不允许修改");
+            }
+
+            // 更新实体（仅用户可改的字段，审核相关字段保持不变）
             existingRepair.UserName = request.UserName;
             existingRepair.Phone = request.Phone;
             existingRepair.ProductBrand = request.ProductBrand;
@@ -455,13 +501,49 @@ namespace OpenAuth.App.Repair
             existingRepair.DetailAddress = request.DetailAddress;
             existingRepair.UpdateTime = DateTime.Now;
 
-            var result = await _db.Updateable(existingRepair)
-                .ExecuteCommandAsync()
-                .ConfigureAwait(false);
-
-            if (result <= 0)
+            // 只把数据库写操作包在事务里，且用 UpdateColumns 显式限定字段
+            // 避免把 Status/HandlerId/HandledTime 等审核字段也写回数据库造成覆盖
+            await _db.Ado.BeginTranAsync();
+            try
             {
-                throw new CommonException("更新报修失败");
+                var result = await _db.Updateable(existingRepair)
+                    .UpdateColumns(x => new
+                    {
+                        x.UserName,
+                        x.Phone,
+                        x.ProductBrand,
+                        x.ProductType,
+                        x.ProductModel,
+                        x.FaultDesc,
+                        x.PurchaseDate,
+                        x.EnergyImage,
+                        x.ProductImage,
+                        x.TradeImage,
+                        x.Province,
+                        x.City,
+                        x.Area,
+                        x.DetailAddress,
+                        x.UpdateTime
+                    })
+                    .ExecuteCommandAsync()
+                    .ConfigureAwait(false);
+
+                if (result <= 0)
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    throw new CommonException("更新报修失败");
+                }
+
+                await _db.Ado.CommitTranAsync();
+            }
+            catch (CommonException)
+            {
+                throw;
+            }
+            catch
+            {
+                await _db.Ado.RollbackTranAsync();
+                throw;
             }
 
             return existingRepair.Id;

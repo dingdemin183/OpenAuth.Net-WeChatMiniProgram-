@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -42,12 +43,9 @@ namespace OpenAuth.WebApi
             Environment = environment;
         }
 
-
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-
-
             // 注册文件上传服务
           //  services.AddScoped<FileUploadApp>();
            // services.AddScoped<CaptchaApp>();
@@ -168,11 +166,19 @@ namespace OpenAuth.WebApi
 
             // 注册 Redis 连接（单例）
             var redisConfig = Configuration["AppSetting:RedisConf"];
+            if (string.IsNullOrEmpty(redisConfig))
+            {
+                throw new Exception("RedisConf 配置未找到！请检查 appsettings.json");
+            }
+
+            logger?.LogInformation($"[Startup] RedisConf = '{redisConfig}'");
+
             services.AddSingleton<ConnectionMultiplexer>(sp =>
                 ConnectionMultiplexer.Connect(redisConfig));
 
             // 注册 CacheContext（作用域）
-            services.AddScoped<ICacheContext, CacheContext>();
+            // Startup.cs
+            services.AddSingleton<ICacheContext, CacheContext>();
 
 
             services.AddCors();
@@ -235,6 +241,24 @@ namespace OpenAuth.WebApi
                 // 配置PostgreSQL数据库处理
                 foreach (var connConfig in connectionConfigs)
                 {
+                    sqlSugar.Aop.OnLogExecuting = (sql, pars) =>
+                    {
+                        //Console.WriteLine(sql);//输出sql,查看执行sql 性能无影响
+
+                        //if(!SysConfig.IsOnline)
+                        //{
+                        //    Common.Log.Info(UtilMethods.GetSqlString(dbType, sql, pars));
+                        //    //获取无参数化SQL 对性能有影响，特别大的SQL参数多的，调试使用
+                        //    //UtilMethods.GetSqlString(DbType.SqlServer,sql,pars)
+                        //}
+
+                        //获取原生SQL推荐 5.1.4.63  性能OK
+                        //Console.WriteLine(UtilMethods.GetNativeSql(sql, pars));
+                        logger?.LogInformation(UtilMethods.GetSqlString(connConfig.DbType, sql, pars));
+
+                        //LogHelper.Debug(UtilMethods.GetNativeSql(sql, pars));
+                    };
+
                     if (connConfig.DbType == SqlSugar.DbType.PostgreSQL)
                     {
                         // 配置bool类型转换为smallint
@@ -270,8 +294,47 @@ namespace OpenAuth.WebApi
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ILoggerFactory loggerFactory)
         {
+
+            ////OPTOPNS到不了UseCors,提前return
+            //app.Use(async (context, next) =>
+            //{
+            //    if (HttpMethods.IsOptions(context.Request.Method))
+            //    {
+            //        context.Response.Headers["Access-Control-Allow-Origin"] = "*";
+            //        context.Response.Headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS";
+            //        context.Response.Headers["Access-Control-Allow-Headers"] = "*";
+            //        context.Response.Headers["Access-Control-Max-Age"] = "86400";
+            //        context.Response.StatusCode = 204;
+            //        return; // 直接结束
+            //    }
+            //    await next();
+            //});
+
+            //app.Use(async (context, next) =>
+            //{
+            //    if (HttpMethods.IsOptions(context.Request.Method))
+            //    {
+            //        // 明确返回浏览器需要的请求头（根据你截图，浏览器要的是 content-type）
+            //        context.Response.Headers["Access-Control-Allow-Origin"] = "*";
+            //        context.Response.Headers["Access-Control-Allow-Methods"] = "POST, GET, PUT, DELETE, OPTIONS";
+            //        context.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
+            //        context.Response.Headers["Access-Control-Max-Age"] = "86400"; // 预检缓存24小时
+
+            //        context.Response.StatusCode = 204; // 204 No Content
+
+            //        // 关键：必须主动完成响应，不能只用 return
+            //        await context.Response.CompleteAsync();
+            //        return;
+            //    }
+
+            //    // 如果不是 OPTIONS 请求，才继续往下走
+            //    await next();
+            //});
+
+
             loggerFactory.AddLog4Net();
 
             app.UseMiddleware<GlobalExceptionMiddleware>();

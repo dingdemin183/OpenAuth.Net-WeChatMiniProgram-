@@ -206,4 +206,53 @@ namespace OpenAuth.App.Request
         /// </summary>
         public string PaySign { get; set; }
     }
+
+
+    /// <summary>
+    /// 延保订单支付状态查询响应（含微信侧信息）
+    /// </summary>
+    public class WarrantyOrderQueryResp
+    {
+        public string Id { get; set; }
+
+        /// <summary>
+        /// 商户订单号
+        /// </summary>
+        public string OrderNo { get; set; }
+
+        /// <summary>
+        /// 微信支付订单号
+        /// </summary>
+        public string TransactionId { get; set; }
+
+        /// <summary>
+        /// 本地订单状态
+        /// </summary>
+        public int CardStatus { get; set; }
+
+        /// <summary>
+        /// 本地订单状态名称
+        /// </summary>
+        public string CardStatusName { get; set; }
+
+        /// <summary>
+        /// 微信交易状态：SUCCESS/REFUND/NOTPAY/CLOSED/REVOKED/USERPAYING/PAYERROR
+        /// </summary>
+        public string TradeState { get; set; }
+
+        /// <summary>
+        /// 微信交易状态描述
+        /// </summary>
+        public string TradeStateDesc { get; set; }
+
+        /// <summary>
+        /// 支付金额（元）
+        /// </summary>
+        public decimal PaidAmount { get; set; }
+
+        /// <summary>
+        /// 支付完成时间
+        /// </summary>
+        public DateTime? PayTime { get; set; }
+    }
 }

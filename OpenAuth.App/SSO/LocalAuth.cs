@@ -8,6 +8,7 @@ using OpenAuth.App.Interface;
 using OpenAuth.Repository.Domain;
 using SqlSugar;
 using System;
+using System.Linq;
 
 namespace OpenAuth.App.SSO
 {
@@ -72,7 +73,7 @@ namespace OpenAuth.App.SSO
 
                 // 从数据库查询完整的微信用户信息
                 var wxUser = _sugarClient.Queryable<SysUserExternalAuth>()
-                    .First(x => x.OpenId == account && x.Provider == "WeChatMiniProgram" && !x.IsDeleted);
+                    .First(x => x.OpenId == account && x.Provider == "WeChatMiniProgram" && x.IsDeleted == false);
 
                 if (wxUser == null) return null;
 
@@ -131,7 +132,7 @@ namespace OpenAuth.App.SSO
                 if (session.AppKey == "miniprogram")
                 {
                     var wxUser = _sugarClient.Queryable<SysUserExternalAuth>()
-                        .First(x => x.OpenId == account && x.Provider == "WeChatMiniProgram" && !x.IsDeleted);
+                        .First(x => x.OpenId == account && x.Provider == "WeChatMiniProgram" && x.IsDeleted==false);
 
                     if (wxUser != null)
                     {
@@ -248,7 +249,7 @@ namespace OpenAuth.App.SSO
 
             if (string.IsNullOrEmpty(token))
             {
-                token = GetToken();
+                token = GetToken();  //获取Token
             }
 
             if (string.IsNullOrEmpty(token))
@@ -266,17 +267,27 @@ namespace OpenAuth.App.SSO
                     return false;
                 }
 
-                // 检查会话是否在缓存中
-                var sessionId = GetSessionIdFromToken(token);
+
+                // 从token中获取SessionId
+                // var sessionId = GetSessionIdFromToken(token);//还要再取一次，浪费性能
+                // var sessionId=principal?.Claims.FirstOrDefault(x => x.Type == "jti")?.Value;
+                var sessionId = principal?.FindFirst("jti")?.Value;//直接从principal中获取
+
+
+                _logger.LogInformation($"[CheckLogin] 解析出的SessionId: {sessionId}");
                 if (string.IsNullOrEmpty(sessionId))
                 {
                     _logger.LogWarning($"[CheckLogin] 无法提取SessionId, Token={token?.Substring(0, Math.Min(20, token?.Length ?? 0))}...");
                     return false;
                 }
-
+                //根据sesionId从redis缓存中获取Session
                 var session = _cacheContext.Get<UserAuthSession>(sessionId);
                 var result = session != null;
 
+                _logger.LogInformation($"[CheckLogin] CacheContext哈希码：{_cacheContext.GetHashCode()}");
+
+
+                _logger.LogInformation($"[CheckLogin] 查询结果：{(session == null ? "null" : session.Account)}");
                 if (!result)
                 {
                     _logger.LogWarning($"[CheckLogin] Session不存在, SessionId={sessionId}");
@@ -325,29 +336,6 @@ namespace OpenAuth.App.SSO
             }
             return context;
         }
-        //public AuthStrategyContext GetCurrentUser()
-        //{
-        //    if (_appConfiguration.Value.IsIdentityAuth)
-        //    {
-        //        return _app.GetAuthStrategyContext(GetToken());
-        //    }
-
-        //    var token = GetToken();
-        //    if (string.IsNullOrEmpty(token)) return null;
-
-        //    var account = JwtTokenHelper.GetAccount(token);
-        //    if (string.IsNullOrEmpty(account)) return null;
-
-        //    var sessionId = GetSessionIdFromToken(token);
-        //    if (string.IsNullOrEmpty(sessionId)) return null;
-
-        //    var session = _cacheContext.Get<UserAuthSession>(sessionId);
-        //    if (session == null) return null;
-
-        //    // 如果只需要 session 信息，可以返回一个轻量级上下文，而不触发 NormalAuthStrategy
-        //    // 但如果你确实需要完整的授权上下文，那只能确保 NormalAuthStrategy 能正常工作
-        //    return _app.GetAuthStrategyContext(account);
-        //}
 
         /// <summary>
         /// 获取当前登录的用户名
